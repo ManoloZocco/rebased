@@ -14,10 +14,10 @@ defmodule Pleroma.Web.ActivityPub.MRF.WalledGarden do
   defp check_local(_actor_info, object), do: {:ok, object}
 
   @impl true
-  def filter(%{"type" => "Create", "actor" => actor } = object) do
+  def filter(%{"type" => "Create", "actor" => actor} = object) do
     check_local(URI.parse(actor), object)
   end
-  
+
   def filter(message), do: {:ok, message}
 
   @impl true
@@ -35,4 +35,3 @@ defmodule Pleroma.Web.ActivityPub.MRF.WalledGarden do
     }
   end
 end
-
