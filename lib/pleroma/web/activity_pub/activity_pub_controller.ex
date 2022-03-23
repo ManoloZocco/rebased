@@ -554,4 +554,15 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubController do
       |> json(UserView.render("featured.json", %{user: user}))
     end
   end
+
+  def endorsements(conn, %{"nickname" => nickname}) do
+    with %User{} = user <- User.get_cached_by_nickname(nickname),
+         users <-
+           User.endorsed_users_relation(user, true)
+           |> Pleroma.Repo.all() do
+      conn
+      |> put_resp_header("content-type", "application/activity+json")
+      |> json(UserView.render("featured_users.json", %{user: user, users: users}))
+    end
+  end
 end

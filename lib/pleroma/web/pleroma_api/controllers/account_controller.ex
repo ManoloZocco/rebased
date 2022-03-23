@@ -112,9 +112,14 @@ defmodule Pleroma.Web.PleromaAPI.AccountController do
   @doc "GET /api/v1/pleroma/accounts/:id/endorsements"
   def endorsements(%{assigns: %{user: for_user, account: user}} = conn, params) do
     users =
-      user
-      |> User.endorsed_users_relation(_restrict_deactivated = true)
-      |> Pleroma.Repo.all()
+      if user.local do
+        user
+        |> User.endorsed_users_relation(_restrict_deactivated = true)
+        |> Pleroma.Repo.all()
+      else
+        Pleroma.User.Query.build(%{ap_id: user.featured_users})
+        |> Pleroma.Repo.all()
+      end
 
     conn
     |> render("index.json",

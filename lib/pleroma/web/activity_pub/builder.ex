@@ -348,4 +348,36 @@ defmodule Pleroma.Web.ActivityPub.Builder do
   defp pinned_url(nickname) when is_binary(nickname) do
     Pleroma.Web.Router.Helpers.activity_pub_url(Pleroma.Web.Endpoint, :pinned, nickname)
   end
+
+  @spec endorse(User.t(), User.t()) :: {:ok, map(), keyword()}
+  def endorse(%User{} = user, pinned_user) do
+    {:ok,
+     %{
+       "id" => Utils.generate_activity_id(),
+       "target" => pinned_users_url(user.nickname),
+       "object" => pinned_user.ap_id,
+       "actor" => user.ap_id,
+       "type" => "Add",
+       "to" => [Pleroma.Constants.as_public()],
+       "cc" => [user.follower_address]
+     }, []}
+  end
+
+  @spec unendorse(User.t(), User.t()) :: {:ok, map, keyword()}
+  def unendorse(%User{} = user, pinned_user) do
+    {:ok,
+     %{
+       "id" => Utils.generate_activity_id(),
+       "target" => pinned_users_url(user.nickname),
+       "object" => pinned_user.id,
+       "actor" => user.ap_id,
+       "type" => "Remove",
+       "to" => [Pleroma.Constants.as_public()],
+       "cc" => [user.follower_address]
+     }, []}
+  end
+
+  defp pinned_users_url(nickname) when is_binary(nickname) do
+    Pleroma.Web.Router.Helpers.activity_pub_url(Pleroma.Web.Endpoint, :endorsements, nickname)
+  end
 end
