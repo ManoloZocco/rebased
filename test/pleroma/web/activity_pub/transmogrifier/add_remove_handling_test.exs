@@ -179,4 +179,87 @@ defmodule Pleroma.Web.ActivityPub.Transmogrifier.AddRemoveHandlingTest do
     user = User.get_cached_by_ap_id(actor)
     assert user.pinned_objects[object_url]
   end
+
+  test "Add/Remove featured users" do
+    user =
+      "test/fixtures/featured_users/user.json"
+      |> File.read!()
+      |> String.replace("{{nickname}}", "alex")
+
+    user2 =
+      "test/fixtures/featured_users/user.json"
+      |> File.read!()
+      |> String.replace("{{nickname}}", "notalex")
+
+    actor = "https://example.com/users/alex"
+    actor2 = "https://example.com/users/notalex"
+
+    Tesla.Mock.mock(fn
+      %{
+        method: :get,
+        url: ^actor
+      } ->
+        %Tesla.Env{
+          status: 200,
+          body: user,
+          headers: [{"content-type", "application/activity+json"}]
+        }
+
+      %{
+        method: :get,
+        url: ^actor2
+      } ->
+        %Tesla.Env{
+          status: 200,
+          body: user2,
+          headers: [{"content-type", "application/activity+json"}]
+        }
+
+      %{method: :get, url: "https://example.com/users/alex/collections/featured_users"} ->
+        %Tesla.Env{
+          status: 200,
+          body:
+            "test/fixtures/featured_users/featured_users.json"
+            |> File.read!()
+            |> String.replace("{{domain}}", "example.com")
+            |> String.replace("{{nickname}}", "notalex"),
+          headers: [{"content-type", "application/activity+json"}]
+        }
+    end)
+
+    message = %{
+      "id" => "https://example.com/objects/d61d6733-e256-4fe1-ab13-1e369789423f",
+      "actor" => actor,
+      "object" => actor2,
+      "target" => "https://example.com/users/alex/collections/featured_users",
+      "type" => "Add",
+      "to" => [Pleroma.Constants.as_public()],
+      "cc" => ["https://example.com/users/alex/followers"],
+      "bcc" => [],
+      "bto" => []
+    }
+
+    assert {:ok, activity} = Transmogrifier.handle_incoming(message)
+    assert activity.data == message
+    user = User.get_cached_by_ap_id(actor)
+    assert Enum.member?(user.featured_users, actor2)
+
+    remove = %{
+      "id" => "http://localhost:400/objects/d61d6733-e256-4fe1-ab13-1e369789423d",
+      "actor" => actor,
+      "object" => actor2,
+      "target" => "https://example.com/users/alex/collections/featured_users",
+      "type" => "Remove",
+      "to" => [Pleroma.Constants.as_public()],
+      "cc" => ["https://example.com/users/alex/followers"],
+      "bcc" => [],
+      "bto" => []
+    }
+
+    assert {:ok, activity} = Transmogrifier.handle_incoming(remove)
+    assert activity.data == remove
+
+    user = refresh_record(user)
+    refute Enum.member?(user.featured_users, actor2)
+  end
 end

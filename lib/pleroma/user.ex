@@ -104,6 +104,7 @@ defmodule Pleroma.User do
     field(:follower_address, :string)
     field(:following_address, :string)
     field(:featured_address, :string)
+    field(:featured_users_address, :string)
     field(:search_rank, :float, virtual: true)
     field(:search_type, :integer, virtual: true)
     field(:tags, {:array, :string}, default: [])
@@ -158,6 +159,7 @@ defmodule Pleroma.User do
     field(:birthday, :date)
     field(:show_birthday, :boolean, default: false)
     field(:location, :string)
+    field(:featured_users, {:array, :string}, default: [])
 
     embeds_one(
       :notification_settings,
@@ -399,6 +401,12 @@ defmodule Pleroma.User do
 
   def ap_featured_collection(%User{} = user), do: "#{ap_id(user)}/collections/featured"
 
+  @spec ap_featured_users_collection(User.t()) :: String.t()
+  def ap_featured_users_collection(%User{featured_users_address: fu}) when is_binary(fu), do: fu
+
+  def ap_featured_users_collection(%User{} = user),
+    do: "#{ap_id(user)}/collections/featured_users"
+
   defp truncate_fields_param(params) do
     if Map.has_key?(params, :fields) do
       Map.put(params, :fields, Enum.map(params[:fields], &truncate_field/1))
@@ -463,6 +471,7 @@ defmodule Pleroma.User do
         :follower_address,
         :following_address,
         :featured_address,
+        :featured_users_address,
         :hide_followers,
         :hide_follows,
         :hide_followers_count,
@@ -478,7 +487,8 @@ defmodule Pleroma.User do
         :pinned_objects,
         :birthday,
         :show_birthday,
-        :location
+        :location,
+        :featured_users
       ]
     )
     |> cast(params, [:name], empty_values: [])
@@ -827,11 +837,13 @@ defmodule Pleroma.User do
     followers = ap_followers(user)
     following = ap_following(user)
     featured = ap_featured_collection(user)
+    featured_users = ap_featured_users_collection(user)
 
     changeset
     |> put_change(:follower_address, followers)
     |> put_change(:following_address, following)
     |> put_change(:featured_address, featured)
+    |> put_change(:featured_users_address, featured_users)
   end
 
   defp autofollow_users(user) do
@@ -1579,7 +1591,14 @@ defmodule Pleroma.User do
           {:error, "Could not endorse: You are not following #{target.nickname}"}
 
         true ->
-          UserRelationship.create_endorsement(endorser, target)
+          with {:ok, relationship} <- UserRelationship.create_endorsement(endorser, target),
+               {:ok, endorse_data, _} <- Builder.endorse(endorser, target),
+               {:ok, _endorsement, _} <-
+                 Pipeline.common_pipeline(endorse_data, endorser.local) do
+            {:ok, relationship}
+          else
+            error -> error
+          end
       end
     end
   end
@@ -2526,6 +2545,38 @@ defmodule Pleroma.User do
     |> cast(
       %{pinned_objects: Map.delete(user.pinned_objects, object_id)},
       [:pinned_objects]
+    )
+    |> update_and_set_cache()
+  end
+
+  @spec add_featured_user_id(User.t(), String.t()) :: {:ok, User.t()} | {:error, term()}
+  def add_featured_user_id(%User{} = user, featured_user_id) do
+    if !Enum.member?(user.featured_users, featured_user_id) do
+      params = %{featured_users: user.featured_users ++ [featured_user_id]}
+
+      user
+      |> cast(params, [:featured_users])
+      |> validate_change(:featured_users, fn :featured_users, featured_users ->
+        max_endorsed_users = Config.get([:instance, :max_endorsed_users], 0)
+
+        if Enum.count(featured_users) <= max_endorsed_users do
+          []
+        else
+          [featured_users: "You have already pinned the maximum number of user"]
+        end
+      end)
+    else
+      change(user)
+    end
+    |> update_and_set_cache()
+  end
+
+  @spec remove_featured_user_id(User.t(), String.t()) :: {:ok, t()} | {:error, term()}
+  def remove_featured_user_id(%User{} = user, featured_user_id) do
+    user
+    |> cast(
+      %{featured_users: user.featured_users -- [featured_user_id]},
+      [:featured_users]
     )
     |> update_and_set_cache()
   end

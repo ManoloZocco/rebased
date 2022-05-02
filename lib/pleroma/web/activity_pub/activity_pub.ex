@@ -1508,6 +1508,9 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
     featured_address = data["featured"]
     {:ok, pinned_objects} = fetch_and_prepare_featured_from_ap_id(featured_address)
 
+    featured_users_address = data["featuredUsers"]
+    {:ok, featured_users} = fetch_and_prepare_featured_users_from_ap_id(featured_users_address)
+
     public_key =
       if is_map(data["publicKey"]) && is_binary(data["publicKey"]["publicKeyPem"]) do
         data["publicKey"]["publicKeyPem"]
@@ -1549,6 +1552,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
       follower_address: data["followers"],
       following_address: data["following"],
       featured_address: featured_address,
+      featured_users_address: featured_users_address,
       bio: data["summary"] || "",
       actor_type: actor_type,
       also_known_as: Map.get(data, "alsoKnownAs", []),
@@ -1559,7 +1563,8 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
       pinned_objects: pinned_objects,
       birthday: birthday,
       show_birthday: show_birthday,
-      location: data["vcard:Address"] || ""
+      location: data["vcard:Address"] || "",
+      featured_users: featured_users
     }
 
     # nickname can be nil because of virtual actors
@@ -1706,6 +1711,17 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
     end)
   end
 
+  def feature_users_from_featured_users_collection(%{
+        "type" => type,
+        "orderedItems" => objects
+      })
+      when type in ["OrderedCollection", "Collection"] do
+    Enum.map(objects, fn
+      %{"id" => user_ap_id} -> user_ap_id
+      user_ap_id when is_binary(user_ap_id) -> user_ap_id
+    end)
+  end
+
   def fetch_and_prepare_featured_from_ap_id(nil) do
     {:ok, %{}}
   end
@@ -1717,6 +1733,23 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
       e ->
         Logger.error("Could not decode featured collection at fetch #{ap_id}, #{inspect(e)}")
         {:ok, %{}}
+    end
+  end
+
+  def fetch_and_prepare_featured_users_from_ap_id(nil) do
+    {:ok, []}
+  end
+
+  def fetch_and_prepare_featured_users_from_ap_id(ap_id) do
+    with {:ok, data} <- Fetcher.fetch_and_contain_remote_object_from_id(ap_id) do
+      {:ok, feature_users_from_featured_users_collection(data)}
+    else
+      e ->
+        Logger.error(
+          "Could not decode featured users collection at fetch #{ap_id}, #{inspect(e)}"
+        )
+
+        {:ok, []}
     end
   end
 

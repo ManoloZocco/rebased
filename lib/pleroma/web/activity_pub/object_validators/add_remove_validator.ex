@@ -55,12 +55,12 @@ defmodule Pleroma.Web.ActivityPub.ObjectValidators.AddRemoveValidator do
     |> validate_inclusion(:type, ~w(Add Remove))
     |> validate_actor_presence()
     |> validate_collection_belongs_to_actor(actor)
-    |> validate_object_presence()
+    |> validate_object_or_user_presence()
   end
 
   defp validate_collection_belongs_to_actor(changeset, actor) do
     validate_change(changeset, :target, fn :target, target ->
-      if target == actor.featured_address do
+      if target in [actor.featured_address, actor.featured_users_address] do
         []
       else
         [target: "collection doesn't belong to actor"]

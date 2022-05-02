@@ -816,6 +816,88 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubControllerTest do
       user = refresh_record(user)
       refute user.pinned_objects[data["object"]]
     end
+
+    test "pin/unpin users", %{conn: conn} do
+      %{ap_id: ap_id} = pinned_user = insert(:user)
+
+      user =
+        File.read!("test/fixtures/featured_users/user.json")
+        |> String.replace("{{nickname}}", "lain")
+
+      actor = "https://example.com/users/lain"
+
+      Tesla.Mock.mock(fn
+        %{
+          method: :get,
+          url: ^actor
+        } ->
+          %Tesla.Env{
+            status: 200,
+            body: user,
+            headers: [{"content-type", "application/activity+json"}]
+          }
+
+        %{method: :get, url: "https://example.com/users/lain/collections/featured_users"} ->
+          %Tesla.Env{
+            status: 200,
+            body:
+              "test/fixtures/featured_users/featured_users.json"
+              |> File.read!()
+              |> String.replace("{{domain}}", "example.com")
+              |> String.replace("{{nickname}}", "lain"),
+            headers: [{"content-type", "application/activity+json"}]
+          }
+
+        %{method: :get, url: ^ap_id} ->
+          %Tesla.Env{
+            status: 200,
+            body:
+              UserView.render("user.json", %{user: pinned_user})
+              |> Jason.encode()
+              |> elem(1),
+            headers: [{"content-type", "application/activity+json"}]
+          }
+      end)
+
+      data = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "actor" => actor,
+        "object" => ap_id,
+        "target" => "https://example.com/users/lain/collections/featured_users",
+        "type" => "Add"
+      }
+
+      assert "ok" ==
+               conn
+               |> assign(:valid_signature, true)
+               |> put_req_header("content-type", "application/activity+json")
+               |> post("/inbox", data)
+               |> json_response(200)
+
+      ObanHelpers.perform(all_enqueued(worker: ReceiverWorker))
+      assert User.get_cached_by_ap_id(data["object"])
+      user = User.get_cached_by_ap_id(data["actor"])
+      assert Enum.member?(user.featured_users, data["object"])
+
+      data = %{
+        "actor" => actor,
+        "object" => pinned_user.ap_id,
+        "target" => "https://example.com/users/lain/collections/featured_users",
+        "type" => "Remove"
+      }
+
+      assert "ok" ==
+               conn
+               |> assign(:valid_signature, true)
+               |> put_req_header("content-type", "application/activity+json")
+               |> post("/inbox", data)
+               |> json_response(200)
+
+      ObanHelpers.perform(all_enqueued(worker: ReceiverWorker))
+      assert User.get_by_ap_id(data["object"])
+      user = refresh_record(user)
+      refute Enum.member?(user.featured_users, data["object"])
+    end
   end
 
   describe "/users/:nickname/inbox" do

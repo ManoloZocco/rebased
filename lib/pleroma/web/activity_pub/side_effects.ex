@@ -337,7 +337,7 @@ defmodule Pleroma.Web.ActivityPub.SideEffects do
   @impl true
   def handle(%{data: %{"type" => "Add"} = data} = object, meta) do
     with %User{} = user <- User.get_cached_by_ap_id(data["actor"]),
-         {:ok, _user} <- User.add_pinned_object_id(user, data["object"]) do
+         {:ok, _user} <- handle_add_pinned_object_or_user(user, data["object"]) do
       # if pinned activity was scheduled for deletion, we remove job
       if expiration = Pleroma.Workers.PurgeExpiredActivity.get_expiration(meta[:activity_id]) do
         Oban.cancel_job(expiration.id)
@@ -349,10 +349,10 @@ defmodule Pleroma.Web.ActivityPub.SideEffects do
         {:error, :user_not_found}
 
       {:error, changeset} ->
-        if changeset.errors[:pinned_objects] do
-          {:error, :pinned_statuses_limit_reached}
-        else
-          changeset.errors
+        cond do
+          changeset.errors[:pinned_objects] -> {:error, :pinned_statuses_limit_reached}
+          changeset.errors[:featured_users] -> {:error, :featured_users_limit_reached}
+          true -> changeset.errors
         end
     end
   end
@@ -364,7 +364,7 @@ defmodule Pleroma.Web.ActivityPub.SideEffects do
   @impl true
   def handle(%{data: %{"type" => "Remove"} = data} = object, meta) do
     with %User{} = user <- User.get_cached_by_ap_id(data["actor"]),
-         {:ok, _user} <- User.remove_pinned_object_id(user, data["object"]) do
+         {:ok, _user} <- handle_remove_pinned_object_or_user(user, data["object"]) do
       data["object"]
       |> Activity.add_by_params_query(user.ap_id, user.featured_address)
       |> Repo.delete_all()
@@ -546,5 +546,31 @@ defmodule Pleroma.Web.ActivityPub.SideEffects do
     meta
     |> send_notifications()
     |> send_streamables()
+  end
+
+  defp handle_add_pinned_object_or_user(user, object_id) do
+    with %Object{} <- Object.get_by_ap_id(object_id) do
+      User.add_pinned_object_id(user, object_id)
+    else
+      nil ->
+        with %User{} <- User.fetch_by_ap_id(object_id) do
+          User.add_featured_user_id(user, object_id)
+        else
+          nil -> User.add_pinned_object_id(user, object_id)
+        end
+    end
+  end
+
+  defp handle_remove_pinned_object_or_user(user, object_id) do
+    with %Object{} <- Object.get_by_ap_id(object_id) do
+      User.remove_pinned_object_id(user, object_id)
+    else
+      nil ->
+        with %User{} <- User.fetch_by_ap_id(object_id) do
+          User.remove_featured_user_id(user, object_id)
+        else
+          nil -> User.remove_pinned_object_id(user, object_id)
+        end
+    end
   end
 end

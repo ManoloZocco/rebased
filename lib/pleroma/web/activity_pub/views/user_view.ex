@@ -105,6 +105,7 @@ defmodule Pleroma.Web.ActivityPub.UserView do
       "inbox" => "#{user.ap_id}/inbox",
       "outbox" => "#{user.ap_id}/outbox",
       "featured" => "#{user.ap_id}/collections/featured",
+      "featuredUsers" => "#{user.ap_id}/collections/featured_users",
       "preferredUsername" => user.nickname,
       "name" => user.name,
       "summary" => user.bio,
@@ -270,6 +271,21 @@ defmodule Pleroma.Web.ActivityPub.UserView do
       "type" => "OrderedCollection",
       "orderedItems" => objects,
       "totalItems" => length(objects)
+    }
+    |> Map.merge(Utils.make_json_ld_header())
+  end
+
+  def render("featured_users.json", %{
+        user: %{featured_users_address: featured_users_address},
+        users: users
+      }) do
+    users = Enum.map(users, fn user -> user.ap_id end)
+
+    %{
+      "id" => featured_users_address,
+      "type" => "OrderedCollection",
+      "orderedItems" => users,
+      "totalItems" => length(users)
     }
     |> Map.merge(Utils.make_json_ld_header())
   end
