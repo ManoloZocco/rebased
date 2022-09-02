@@ -203,6 +203,8 @@ defmodule Pleroma.Mixfile do
       {:open_api_spex, "~> 3.10"},
       {:phoenix_live_dashboard, "~> 0.6.2"},
       {:ecto_psql_extras, "~> 0.6"},
+      {:absinthe, "~> 1.7"},
+      {:absinthe_plug, "~> 1.5"},
 
       # indirect dependency version override
       {:plug, "~> 1.10.4", override: true},
@@ -210,7 +212,7 @@ defmodule Pleroma.Mixfile do
       ## dev & test
       {:ex_doc, "~> 0.22", only: :dev, runtime: false},
       {:ex_machina, "~> 2.4", only: :test},
-      {:credo, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
       {:mock, "~> 0.3.5", only: :test},
       # temporary downgrade for excoveralls, hackney until hackney max_connections bug will be fixed
       {:excoveralls, "0.12.3", only: :test},
