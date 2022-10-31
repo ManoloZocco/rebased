@@ -15,7 +15,7 @@ defmodule Pleroma.Web.MastodonAPI.StatusController do
   alias Pleroma.Object
   alias Pleroma.Repo
   alias Pleroma.ScheduledActivity
-  alias Pleroma.Translation
+  alias Pleroma.Language.Translation
   alias Pleroma.User
   alias Pleroma.Web.ActivityPub.ActivityPub
   alias Pleroma.Web.ActivityPub.Visibility
