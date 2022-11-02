@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 defmodule Pleroma.Language.Translation.Provider do
+  @callback missing_dependencies() :: [String.t()]
+
   @callback configured?() :: boolean()
 
   @callback translate(
