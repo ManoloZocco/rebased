@@ -409,7 +409,7 @@ defmodule Pleroma.Web.AdminAPI.ConfigControllerTest do
     end
 
     test "saving config which need pleroma reboot", %{conn: conn} do
-      clear_config([:shout, :enabled], true)
+      clear_config([:media_proxy, :enabled], true)
 
       assert conn
              |> put_req_header("content-type", "application/json")
@@ -417,7 +417,7 @@ defmodule Pleroma.Web.AdminAPI.ConfigControllerTest do
                "/api/pleroma/admin/config",
                %{
                  configs: [
-                   %{group: ":pleroma", key: ":shout", value: [%{"tuple" => [":enabled", true]}]}
+                   %{group: ":pleroma", key: ":media_proxy", value: [%{"tuple" => [":enabled", true]}]}
                  ]
                }
              )
@@ -426,7 +426,7 @@ defmodule Pleroma.Web.AdminAPI.ConfigControllerTest do
                  %{
                    "db" => [":enabled"],
                    "group" => ":pleroma",
-                   "key" => ":shout",
+                   "key" => ":media_proxy",
                    "value" => [%{"tuple" => [":enabled", true]}]
                  }
                ],
@@ -454,7 +454,7 @@ defmodule Pleroma.Web.AdminAPI.ConfigControllerTest do
     end
 
     test "update setting which need reboot, don't change reboot flag until reboot", %{conn: conn} do
-      clear_config([:shout, :enabled], true)
+      clear_config([:media_proxy, :enabled], true)
 
       assert conn
              |> put_req_header("content-type", "application/json")
@@ -462,7 +462,7 @@ defmodule Pleroma.Web.AdminAPI.ConfigControllerTest do
                "/api/pleroma/admin/config",
                %{
                  configs: [
-                   %{group: ":pleroma", key: ":shout", value: [%{"tuple" => [":enabled", true]}]}
+                   %{group: ":pleroma", key: ":media_proxy", value: [%{"tuple" => [":enabled", true]}]}
                  ]
                }
              )
@@ -471,7 +471,7 @@ defmodule Pleroma.Web.AdminAPI.ConfigControllerTest do
                  %{
                    "db" => [":enabled"],
                    "group" => ":pleroma",
-                   "key" => ":shout",
+                   "key" => ":media_proxy",
                    "value" => [%{"tuple" => [":enabled", true]}]
                  }
                ],
