@@ -21,7 +21,8 @@ config :pleroma, :mrf,
     Pleroma.Web.ActivityPub.MRF.HellthreadPolicy,
     Pleroma.Web.ActivityPub.MRF.ObjectAgePolicy,
     Pleroma.Web.ActivityPub.MRF.TagPolicy,
-    Pleroma.Web.ActivityPub.MRF.InlineQuotePolicy
+    Pleroma.Web.ActivityPub.MRF.InlineQuotePolicy,
+    Pleroma.Web.ActivityPub.MRF.NormalizeMarkup
   ]
 
 # Increase the pool size and timeout
