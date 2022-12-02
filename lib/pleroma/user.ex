@@ -2557,14 +2557,14 @@ defmodule Pleroma.User do
 
   defp valid_field?(_), do: false
 
-  defp truncate_field(%{"name" => name, "value" => value}) do
+  defp truncate_field(%{"name" => name, "value" => value} = field) do
     {name, _chopped} =
       String.split_at(name, Config.get([:instance, :account_field_name_length], 255))
 
     {value, _chopped} =
       String.split_at(value, Config.get([:instance, :account_field_value_length], 255))
 
-    %{"name" => name, "value" => value}
+    %{"name" => name, "value" => value, "verified_at" => Map.get(field, "verified_at")}
   end
 
   def admin_api_update(user, params) do
