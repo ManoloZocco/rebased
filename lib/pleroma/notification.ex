@@ -439,7 +439,8 @@ defmodule Pleroma.Notification do
            create_notification(activity, user,
              do_send: do_send,
              type: "pleroma:thread_subscription"
-           ) ++
+           )
+         end) ++
          Enum.map(potential_participants, fn user ->
            do_send = do_send && user in enabled_participants
            create_notification(activity, user, do_send: do_send, type: "pleroma:event_update")

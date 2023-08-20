@@ -52,7 +52,8 @@ defmodule Pleroma.Web.PleromaAPI.StatusController do
       conn
       |> put_view(StatusView)
       |> try_render("show.json", activity: activity, for: user, as: :activity)
-         end
+    end
+  end
 
   @doc "GET /api/v1/pleroma/statuses/:id/quotes"
   def quotes(%{assigns: %{user: user}} = conn, %{id: id} = params) do
