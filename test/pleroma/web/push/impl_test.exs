@@ -27,6 +27,8 @@ defmodule Pleroma.Web.Push.ImplTest do
         %Tesla.Env{status: 100}
     end)
 
+    Mox.stub_with(Pleroma.UnstubbedConfigMock, Pleroma.Config)
+
     :ok
   end
 
@@ -261,6 +263,8 @@ defmodule Pleroma.Web.Push.ImplTest do
 
       {:ok, chat} = CommonAPI.post_chat_message(user, recipient, nil, media_id: upload.id)
       object = Object.normalize(chat, fetch: false)
+
+      Pleroma.Tests.ObanHelpers.perform_all()
       [notification] = Notification.for_user(recipient)
 
       res = Impl.build_content(notification, user, object)
@@ -362,6 +366,7 @@ defmodule Pleroma.Web.Push.ImplTest do
              }
 
       {:ok, activity} = CommonAPI.favorite(user, activity.id)
+      Pleroma.Tests.ObanHelpers.perform_all()
 
       notif = insert(:notification, user: user2, activity: activity, type: "favourite")
 

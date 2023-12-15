@@ -11,6 +11,7 @@ defmodule Pleroma.Web.ApiSpec.AccountOperation do
   alias Pleroma.Web.ApiSpec.Schemas.ActorType
   alias Pleroma.Web.ApiSpec.Schemas.ApiError
   alias Pleroma.Web.ApiSpec.Schemas.BooleanLike
+  alias Pleroma.Web.ApiSpec.Schemas.FlakeID
   alias Pleroma.Web.ApiSpec.Schemas.List
   alias Pleroma.Web.ApiSpec.Schemas.Status
   alias Pleroma.Web.ApiSpec.Schemas.VisibilityScope
@@ -129,6 +130,12 @@ defmodule Pleroma.Web.ApiSpec.AccountOperation do
             :query,
             BooleanLike,
             "Include only statuses with media attached"
+          ),
+          Operation.parameter(
+            :only_events,
+            :query,
+            BooleanLike,
+            "Include only objects with Event type"
           ),
           Operation.parameter(
             :with_muted,
@@ -474,6 +481,7 @@ defmodule Pleroma.Web.ApiSpec.AccountOperation do
       ],
       responses: %{
         200 => Operation.response("Account", "application/json", Account),
+        401 => Operation.response("Error", "application/json", ApiError),
         404 => Operation.response("Error", "application/json", ApiError)
       }
     }
@@ -504,6 +512,47 @@ defmodule Pleroma.Web.ApiSpec.AccountOperation do
       description: "Not implemented",
       responses: %{
         200 => empty_array_response()
+      }
+    }
+  end
+
+  def familiar_followers_operation do
+    %Operation{
+      tags: ["Retrieve account information"],
+      summary: "Followers you know",
+      operationId: "AccountController.relationships",
+      description: "Returns followers of given account you know.",
+      security: [%{"oAuth" => ["read:follows"]}],
+      parameters: [
+        Operation.parameter(
+          :id,
+          :query,
+          %Schema{
+            oneOf: [%Schema{type: :array, items: %Schema{type: :string}}, %Schema{type: :string}]
+          },
+          "Account IDs",
+          example: "123"
+        )
+      ],
+      responses: %{
+        200 =>
+          Operation.response("Accounts", "application/json", %Schema{
+            title: "ArrayOfAccounts",
+            type: :array,
+            items: %Schema{
+              title: "Account",
+              type: :object,
+              properties: %{
+                id: FlakeID,
+                accounts: %Schema{
+                  title: "ArrayOfAccounts",
+                  type: :array,
+                  items: Account,
+                  example: [Account.schema().example]
+                }
+              }
+            }
+          })
       }
     }
   end
@@ -566,6 +615,11 @@ defmodule Pleroma.Web.ApiSpec.AccountOperation do
           type: :string,
           nullable: true,
           description: "Invite token required when the registrations aren't public"
+        },
+        accepts_email_list: %Schema{
+          allOf: [BooleanLike],
+          description:
+            "Whether the user opts-in to receiving news and marketing updates from site admins."
         },
         birthday: %Schema{
           nullable: true,
@@ -763,6 +817,11 @@ defmodule Pleroma.Web.ApiSpec.AccountOperation do
             "Discovery (listing, indexing) of this account by external services (search bots etc.) is allowed."
         },
         actor_type: ActorType,
+        accepts_email_list: %Schema{
+          allOf: [BooleanLike],
+          description:
+            "Whether the user opts-in to receiving news and marketing updates from site admins."
+        },
         birthday: %Schema{
           nullable: true,
           description: "User's birthday",
@@ -781,6 +840,11 @@ defmodule Pleroma.Web.ApiSpec.AccountOperation do
           allOf: [BooleanLike],
           nullable: true,
           description: "User's birthday will be visible"
+        },
+        location: %Schema{
+          type: :string,
+          nullable: true,
+          description: "User location"
         }
       },
       example: %{

@@ -49,13 +49,13 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Account do
           },
           background_image: %Schema{type: :string, nullable: true, format: :uri},
           birthday: %Schema{type: :string, nullable: true, format: :date},
-          chat_token: %Schema{type: :string},
           is_confirmed: %Schema{
             type: :boolean,
             description:
               "whether the user account is waiting on email confirmation to be activated"
           },
           show_birthday: %Schema{type: :boolean, nullable: true},
+          location: %Schema{type: :string, nullable: true},
           hide_favorites: %Schema{type: :boolean},
           hide_followers_count: %Schema{
             type: :boolean,
@@ -179,8 +179,6 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Account do
         "is_moderator" => false,
         "skip_thread_containment" => false,
         "accepts_chat_messages" => true,
-        "chat_token" =>
-          "SFMyNTY.g3QAAAACZAAEZGF0YW0AAAASOXRLaTNlc2JHN09RZ1oyOTIwZAAGc2lnbmVkbgYARNplS3EB.Mb_Iaqew2bN1I1o79B_iP7encmVCpTKC4OtHZRxdjKc",
         "unread_conversation_count" => 0,
         "tags" => [],
         "notification_settings" => %{

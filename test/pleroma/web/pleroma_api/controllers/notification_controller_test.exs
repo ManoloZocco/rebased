@@ -11,6 +11,11 @@ defmodule Pleroma.Web.PleromaAPI.NotificationControllerTest do
 
   import Pleroma.Factory
 
+  setup do
+    Mox.stub_with(Pleroma.UnstubbedConfigMock, Pleroma.Config)
+    :ok
+  end
+
   describe "POST /api/v1/pleroma/notifications/read" do
     setup do: oauth_access(["write:notifications"])
 
@@ -37,6 +42,7 @@ defmodule Pleroma.Web.PleromaAPI.NotificationControllerTest do
       {:ok, _activity1} = CommonAPI.post(user2, %{status: "hi @#{user1.nickname}"})
       {:ok, _activity2} = CommonAPI.post(user2, %{status: "hi @#{user1.nickname}"})
       {:ok, _activity3} = CommonAPI.post(user2, %{status: "HIE @#{user1.nickname}"})
+      Pleroma.Tests.ObanHelpers.perform_all()
 
       [notification3, notification2, notification1] = Notification.for_user(user1, %{limit: 3})
 

@@ -21,7 +21,7 @@ defmodule HttpRequestMock do
     else
       error ->
         with {:error, message} <- error do
-          Logger.warn(to_string(message))
+          Logger.warning(to_string(message))
         end
 
         {_, _r} = error
@@ -1371,6 +1371,36 @@ defmodule HttpRequestMock do
      }}
   end
 
+  def get("https://misskey.io/users/83ssedkv53", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/aimu@misskey.io.json"),
+       headers: activitypub_object_headers()
+     }}
+  end
+
+  def get("https://misskey.io/notes/8vs6wxufd0", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/misskey.io_8vs6wxufd0.json"),
+       headers: activitypub_object_headers()
+     }}
+  end
+
+  def get("https://mitra.social/objects/01830912-1357-d4c5-e4a2-76eab347e749", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body:
+         File.read!(
+           "test/fixtures/tesla_mock/mitra.social_01830912-1357-d4c5-e4a2-76eab347e749.json"
+         ),
+       headers: activitypub_object_headers()
+     }}
+  end
+
   def get("https://gleasonator.com/objects/102eb097-a18b-4cd5-abfc-f952efcb70bb", _, _, _) do
     {:ok,
      %Tesla.Env{
@@ -1401,11 +1431,29 @@ defmodule HttpRequestMock do
      }}
   end
 
+  def get("https://friends.grishka.me/posts/54642", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/smithereen_non_anonymous_poll.json"),
+       headers: activitypub_object_headers()
+     }}
+  end
+
   def get("https://mk.absturztau.be/users/8ozbzjs3o8", _, _, _) do
     {:ok,
      %Tesla.Env{
        status: 200,
        body: File.read!("test/fixtures/tesla_mock/mametsuko@mk.absturztau.be.json"),
+       headers: activitypub_object_headers()
+     }}
+  end
+
+  def get("https://friends.grishka.me/users/1", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/smithereen_user.json"),
        headers: activitypub_object_headers()
      }}
   end
@@ -1443,6 +1491,148 @@ defmodule HttpRequestMock do
        status: 200,
        body: File.read!("test/fixtures/tesla_mock/p.helene.moe-AM7S6vZQmL6pI9TgPY.json"),
        headers: activitypub_object_headers()
+     }}
+  end
+
+  def get(
+        "https://nominatim.openstreetmap.org/search?format=geocodejson&q=Benis&limit=10&accept-language=en&addressdetails=1&namedetails=1",
+        _,
+        _,
+        _
+      ) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/nominatim_search_results.json"),
+       headers: [{"content-type", "application/json"}]
+     }}
+  end
+
+  def get(
+        "https://nominatim.openstreetmap.org/lookup?format=geocodejson&osm_ids=N3726208425,R3726208425,W3726208425&accept-language=en&addressdetails=1&namedetails=1",
+        _,
+        _,
+        _
+      ) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/nominatim_single_result.json"),
+       headers: [{"content-type", "application/json"}]
+     }}
+  end
+
+  def get("https://mastodon.example/.well-known/host-meta", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 302,
+       headers: [{"location", "https://sub.mastodon.example/.well-known/host-meta"}]
+     }}
+  end
+
+  def get("https://sub.mastodon.example/.well-known/host-meta", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body:
+         "test/fixtures/webfinger/masto-host-meta.xml"
+         |> File.read!()
+         |> String.replace("{{domain}}", "sub.mastodon.example")
+     }}
+  end
+
+  def get(
+        "https://sub.mastodon.example/.well-known/webfinger?resource=acct:a@mastodon.example",
+        _,
+        _,
+        _
+      ) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body:
+         "test/fixtures/webfinger/masto-webfinger.json"
+         |> File.read!()
+         |> String.replace("{{nickname}}", "a")
+         |> String.replace("{{domain}}", "mastodon.example")
+         |> String.replace("{{subdomain}}", "sub.mastodon.example"),
+       headers: [{"content-type", "application/jrd+json"}]
+     }}
+  end
+
+  def get("https://sub.mastodon.example/users/a", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body:
+         "test/fixtures/webfinger/masto-user.json"
+         |> File.read!()
+         |> String.replace("{{nickname}}", "a")
+         |> String.replace("{{domain}}", "sub.mastodon.example"),
+       headers: [{"content-type", "application/activity+json"}]
+     }}
+  end
+
+  def get("https://sub.mastodon.example/users/a/collections/featured", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body:
+         File.read!("test/fixtures/users_mock/masto_featured.json")
+         |> String.replace("{{domain}}", "sub.mastodon.example")
+         |> String.replace("{{nickname}}", "a"),
+       headers: [{"content-type", "application/activity+json"}]
+     }}
+  end
+
+  def get("https://pleroma.example/.well-known/host-meta", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 302,
+       headers: [{"location", "https://sub.pleroma.example/.well-known/host-meta"}]
+     }}
+  end
+
+  def get("https://sub.pleroma.example/.well-known/host-meta", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body:
+         "test/fixtures/webfinger/pleroma-host-meta.xml"
+         |> File.read!()
+         |> String.replace("{{domain}}", "sub.pleroma.example")
+     }}
+  end
+
+  def get(
+        "https://sub.pleroma.example/.well-known/webfinger?resource=acct:a@pleroma.example",
+        _,
+        _,
+        _
+      ) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body:
+         "test/fixtures/webfinger/pleroma-webfinger.json"
+         |> File.read!()
+         |> String.replace("{{nickname}}", "a")
+         |> String.replace("{{domain}}", "pleroma.example")
+         |> String.replace("{{subdomain}}", "sub.pleroma.example"),
+       headers: [{"content-type", "application/jrd+json"}]
+     }}
+  end
+
+  def get("https://sub.pleroma.example/users/a", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body:
+         "test/fixtures/webfinger/pleroma-user.json"
+         |> File.read!()
+         |> String.replace("{{nickname}}", "a")
+         |> String.replace("{{domain}}", "sub.pleroma.example"),
+       headers: [{"content-type", "application/activity+json"}]
      }}
   end
 
@@ -1509,6 +1699,24 @@ defmodule HttpRequestMock do
      %Tesla.Env{
        status: 404,
        body: ""
+     }}
+  end
+
+  def post("https://api-free.deepl.com/v2/translate" <> _, _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/deepl-translation.json"),
+       headers: [{"content-type", "application/json"}]
+     }}
+  end
+
+  def post("https://api-free.deepl.com/v2/languages" <> _, _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/deepl-languages-list.json"),
+       headers: [{"content-type", "application/json"}]
      }}
   end
 

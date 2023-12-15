@@ -297,12 +297,18 @@ defmodule Pleroma.Activity do
   def normalize(_), do: nil
 
   def delete_all_by_object_ap_id(id) when is_binary(id) do
-    id
-    |> Queries.by_object_id()
-    |> Queries.exclude_type("Delete")
-    |> select([u], u)
-    |> Repo.delete_all(timeout: :infinity)
-    |> elem(1)
+    activities =
+      id
+      |> Queries.by_object_id()
+      |> Queries.exclude_type("Delete")
+      |> select([u], u)
+      |> Repo.delete_all(timeout: :infinity)
+      |> elem(1)
+
+    activities
+    |> Enum.each(fn %{data: %{"id" => ap_id}} -> delete_all_by_object_ap_id(ap_id) end)
+
+    activities
     |> Enum.find(fn
       %{data: %{"type" => "Create", "object" => ap_id}} when is_binary(ap_id) -> ap_id == id
       %{data: %{"type" => "Create", "object" => %{"id" => ap_id}}} -> ap_id == id
@@ -368,7 +374,7 @@ defmodule Pleroma.Activity do
     )
   end
 
-  defdelegate search(user, query, options \\ []), to: Pleroma.Activity.Search
+  defdelegate search(user, query, options \\ []), to: Pleroma.Search.DatabaseSearch
 
   def direct_conversation_id(activity, for_user) do
     alias Pleroma.Conversation.Participation

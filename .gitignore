@@ -10,6 +10,7 @@
 /test/fixtures/test_tmp.txt
 /test/fixtures/image_tmp.jpg
 /test/tmp/
+/test/frontend_static_test/
 /doc
 /instance
 /priv/ssh_keys
@@ -52,9 +53,6 @@ docs/generated_config.md
 
 .idea
 pleroma.iml
-
-# asdf
-.tool-versions
 
 # Editor temp files
 /*~

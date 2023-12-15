@@ -12,7 +12,6 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
   alias Pleroma.Filter
   alias Pleroma.Hashtag
   alias Pleroma.Maps
-  alias Pleroma.Notification
   alias Pleroma.Object
   alias Pleroma.Object.Containment
   alias Pleroma.Object.Fetcher
@@ -20,16 +19,21 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
   alias Pleroma.Repo
   alias Pleroma.Upload
   alias Pleroma.User
+  alias Pleroma.Web.ActivityPub.Builder
   alias Pleroma.Web.ActivityPub.MRF
+  alias Pleroma.Web.ActivityPub.Pipeline
   alias Pleroma.Web.ActivityPub.Transmogrifier
   alias Pleroma.Web.Streamer
   alias Pleroma.Web.WebFinger
   alias Pleroma.Workers.BackgroundWorker
+  alias Pleroma.Workers.EventReminderWorker
+  alias Pleroma.Workers.NotificationWorker
   alias Pleroma.Workers.PollWorker
 
   import Ecto.Query
   import Pleroma.Web.ActivityPub.Utils
   import Pleroma.Web.ActivityPub.Visibility
+  import Pleroma.Webhook.Notify, only: [trigger_webhooks: 2]
 
   require Logger
   require Pleroma.Constants
@@ -96,6 +100,17 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
 
   defp increase_replies_count_if_reply(_create_data), do: :noop
 
+  defp increase_quotes_count_if_quote(%{
+         "object" => %{"quoteUrl" => quote_ap_id} = object,
+         "type" => "Create"
+       }) do
+    if is_public?(object) do
+      Object.increase_quotes_count(quote_ap_id)
+    end
+  end
+
+  defp increase_quotes_count_if_quote(_create_data), do: :noop
+
   @object_types ~w[ChatMessage Question Answer Audio Video Image Event Article Note Page]
   @impl true
   def persist(%{"type" => type} = object, meta) when type in @object_types do
@@ -139,6 +154,9 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
       ConcurrentLimiter.limit(Pleroma.Web.RichMedia.Helpers, fn ->
         Task.start(fn -> Pleroma.Web.RichMedia.Helpers.fetch_data_for_activity(activity) end)
       end)
+
+      # Add local posts to search index
+      if local, do: Pleroma.Search.add_to_index(activity)
 
       {:ok, activity}
     else
@@ -188,7 +206,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
   end
 
   def notify_and_stream(activity) do
-    Notification.create_notifications(activity)
+    NotificationWorker.enqueue("create", %{"activity_id" => activity.id})
 
     original_activity =
       case activity do
@@ -299,11 +317,14 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
     with {:ok, activity} <- insert(create_data, local, fake),
          {:fake, false, activity} <- {:fake, fake, activity},
          _ <- increase_replies_count_if_reply(create_data),
+         _ <- increase_quotes_count_if_quote(create_data),
          {:quick_insert, false, activity} <- {:quick_insert, quick_insert?, activity},
          {:ok, _actor} <- increase_note_count_if_public(actor, activity),
          {:ok, _actor} <- update_last_status_at_if_public(actor, activity),
          _ <- notify_and_stream(activity),
          :ok <- maybe_schedule_poll_notifications(activity),
+         :ok <- maybe_schedule_event_notifications(activity),
+         :ok <- maybe_join_own_event(actor, activity),
          :ok <- maybe_federate(activity) do
       {:ok, activity}
     else
@@ -322,6 +343,21 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
     PollWorker.schedule_poll_end(activity)
     :ok
   end
+
+  defp maybe_schedule_event_notifications(activity) do
+    EventReminderWorker.schedule_event_reminder(activity)
+    :ok
+  end
+
+  defp maybe_join_own_event(actor, %{object: %{data: %{"type" => "Event"}} = object}) do
+    {:ok, join_object, meta} = Builder.join(actor, object)
+
+    {:ok, _, _} = Pipeline.common_pipeline(join_object, Keyword.put(meta, :local, true))
+
+    :ok
+  end
+
+  defp maybe_join_own_event(_, _), do: :ok
 
   @spec listen(map()) :: {:ok, Activity.t()} | {:error, any()}
   def listen(%{to: to, actor: actor, context: context, object: object} = params) do
@@ -399,6 +435,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
          {:ok, activity} <- insert(flag_data, local),
          {:ok, stripped_activity} <- strip_report_status_data(activity),
          _ <- notify_and_stream(activity),
+         _ <- trigger_webhooks(activity, :"report.created"),
          :ok <-
            maybe_federate(stripped_activity) do
       User.all_users_with_privilege(:reports_manage_reports)
@@ -436,6 +473,8 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
         "target_id" => target.id
       })
 
+      User.update_last_move_at(origin)
+
       {:ok, activity}
     else
       false -> {:error, "Target account must have the origin in `alsoKnownAs`"}
@@ -463,9 +502,8 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
     |> where(
       [activity],
       fragment(
-        "?->>'type' = ? and ?->>'context' = ?",
+        "?->>'type' = 'Create' and ?->>'context' = ?",
         activity.data,
-        "Create",
         activity.data,
         ^context
       )
@@ -663,12 +701,14 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
   end
 
   defp fetch_activities_for_user(user, reading_user, params) do
+    pinned_object_ids = if user.pinned_objects, do: Map.keys(user.pinned_objects), else: []
+
     params =
       params
       |> Map.put(:type, ["Create", "Announce"])
       |> Map.put(:user, reading_user)
       |> Map.put(:actor_id, user.ap_id)
-      |> Map.put(:pinned_object_ids, Map.keys(user.pinned_objects))
+      |> Map.put(:pinned_object_ids, pinned_object_ids)
 
     params =
       if User.blocks?(reading_user, user) do
@@ -939,6 +979,14 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
 
   defp restrict_state(query, _), do: query
 
+  defp restrict_assigned_account(query, %{assigned_account: assigned_account}) do
+    from(activity in query,
+      where: fragment("?->>'assigned_account' = ?", activity.data, ^assigned_account)
+    )
+  end
+
+  defp restrict_assigned_account(query, _), do: query
+
   defp restrict_favorited_by(query, %{favorited_by: ap_id}) do
     from(
       [_activity, object] in query,
@@ -955,17 +1003,32 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
   defp restrict_media(query, %{only_media: true}) do
     from(
       [activity, object] in query,
-      where: fragment("(?)->>'type' = ?", activity.data, "Create"),
+      where: fragment("(?)->>'type' = 'Create'", activity.data),
       where: fragment("not (?)->'attachment' = (?)", object.data, ^[])
     )
   end
 
   defp restrict_media(query, _), do: query
 
+  defp restrict_events(_query, %{only_events: _val, skip_preload: true}) do
+    raise "Can't use the child object without preloading!"
+  end
+
+  defp restrict_events(query, %{only_events: true}) do
+    from(
+      [activity, object] in query,
+      where: fragment("(?)->>'type' = 'Create'", activity.data),
+      where: fragment("(?)->>'type' = 'Event'", object.data)
+    )
+  end
+
+  defp restrict_events(query, _), do: query
+
   defp restrict_replies(query, %{exclude_replies: true}) do
     from(
-      [_activity, object] in query,
-      where: fragment("?->>'inReplyTo' is null", object.data)
+      [activity, object] in query,
+      where:
+        fragment("?->>'inReplyTo' is null or ?->>'type' = 'Announce'", object.data, activity.data)
     )
   end
 
@@ -1216,6 +1279,29 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
 
   defp restrict_filtered(query, _), do: query
 
+  defp restrict_object(query, %{object: object}) do
+    from(activity in query, where: fragment("?->>'object' = ?", activity.data, ^object))
+  end
+
+  defp restrict_object(query, _), do: query
+
+  defp restrict_quote_url(query, %{quote_url: quote_url}) do
+    from([_activity, object] in query,
+      where: fragment("(?)->'quoteUrl' = ?", object.data, ^quote_url)
+    )
+  end
+
+  defp restrict_quote_url(query, _), do: query
+
+  defp restrict_join_state(query, %{state: state}) when is_binary(state) do
+    from(
+      [activity] in query,
+      where: fragment("(?)->>'state' = ?", activity.data, ^state)
+    )
+  end
+
+  defp restrict_join_state(query, _), do: query
+
   defp restrict_unauthenticated(query, nil) do
     local = Config.restrict_unauthenticated_access?(:activities, :local)
     remote = Config.restrict_unauthenticated_access?(:activities, :remote)
@@ -1242,7 +1328,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
   defp exclude_poll_votes(query, _) do
     if has_named_binding?(query, :object) do
       from([activity, object: o] in query,
-        where: fragment("not(?->>'type' = ?)", o.data, "Answer")
+        where: fragment("not(?->>'type' = 'Answer')", o.data)
       )
     else
       query
@@ -1254,7 +1340,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
   defp exclude_chat_messages(query, _) do
     if has_named_binding?(query, :object) do
       from([activity, object: o] in query,
-        where: fragment("not(?->>'type' = ?)", o.data, "ChatMessage")
+        where: fragment("not(?->>'type' = 'ChatMessage')", o.data)
       )
     else
       query
@@ -1385,12 +1471,14 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
       |> restrict_actor(opts)
       |> restrict_type(opts)
       |> restrict_state(opts)
+      |> restrict_assigned_account(opts)
       |> restrict_favorited_by(opts)
       |> restrict_blocked(restrict_blocked_opts)
       |> restrict_blockers_visibility(opts)
       |> restrict_muted(restrict_muted_opts)
       |> restrict_filtered(opts)
       |> restrict_media(opts)
+      |> restrict_events(opts)
       |> restrict_visibility(opts)
       |> restrict_thread_visibility(opts, config)
       |> restrict_reblogs(opts)
@@ -1398,7 +1486,9 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
       |> restrict_muted_reblogs(restrict_muted_reblogs_opts)
       |> restrict_instance(opts)
       |> restrict_announce_object_actor(opts)
+      |> restrict_object(opts)
       |> restrict_filtered(opts)
+      |> restrict_quote_url(opts)
       |> maybe_restrict_deactivated_users(opts)
       |> exclude_poll_votes(opts)
       |> exclude_chat_messages(opts)
@@ -1589,8 +1679,9 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
       accepts_chat_messages: accepts_chat_messages,
       birthday: birthday,
       show_birthday: show_birthday,
-      pinned_objects: pinned_objects,
-      nickname: nickname
+      nickname: nickname,
+      location: data["vcard:Address"] || "",
+      pinned_objects: pinned_objects
     }
   end
 
@@ -1825,4 +1916,19 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
 
   defp maybe_restrict_deactivated_users(activity, _opts),
     do: Activity.restrict_deactivated_users(activity)
+
+  def fetch_joined_events(user, params \\ %{}, pagination \\ :keyset) do
+    user.ap_id
+    |> Activity.Queries.by_actor()
+    |> Activity.Queries.by_type("Join")
+    |> Activity.with_joined_object()
+    |> Object.with_joined_activity()
+    |> select([join, object, activity], %{activity | object: object, pagination_id: join.id})
+    |> order_by([join, _, _], desc_nulls_last: join.id)
+    |> restrict_join_state(params)
+    |> Pagination.fetch_paginated(
+      Map.merge(params, %{skip_order: true}),
+      pagination
+    )
+  end
 end

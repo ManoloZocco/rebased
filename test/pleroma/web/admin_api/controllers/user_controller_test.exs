@@ -19,6 +19,11 @@ defmodule Pleroma.Web.AdminAPI.UserControllerTest do
   alias Pleroma.Web.Endpoint
   alias Pleroma.Web.MediaProxy
 
+  setup do
+    Mox.stub_with(Pleroma.UnstubbedConfigMock, Pleroma.Config)
+    :ok
+  end
+
   setup_all do
     Tesla.Mock.mock_global(fn env -> apply(HttpRequestMock, :request, [env]) end)
 
@@ -138,6 +143,48 @@ defmodule Pleroma.Web.AdminAPI.UserControllerTest do
         |> delete("/api/pleroma/admin/users?nickname=nickname")
 
       assert json_response(response, :forbidden)
+    end
+
+    test "Moderators can't delete admins" do
+      admin = insert(:user, is_admin: true)
+      moderator = insert(:user, is_moderator: true)
+      token = insert(:oauth_admin_token, user: moderator)
+
+      conn =
+        build_conn()
+        |> assign(:user, moderator)
+        |> assign(:token, token)
+
+      response =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("content-type", "application/json")
+        |> delete("/api/pleroma/admin/users", %{
+          nicknames: [admin.nickname]
+        })
+
+      assert json_response(response, :forbidden)
+    end
+
+    test "Moderators can delete other moderators" do
+      moderator1 = insert(:user, is_moderator: true)
+      moderator2 = insert(:user, is_moderator: true)
+      token = insert(:oauth_admin_token, user: moderator1)
+
+      conn =
+        build_conn()
+        |> assign(:user, moderator1)
+        |> assign(:token, token)
+
+      response =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("content-type", "application/json")
+        |> delete("/api/pleroma/admin/users", %{
+          nicknames: [moderator2.nickname]
+        })
+
+      assert json_response(response, 200)
     end
   end
 

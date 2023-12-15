@@ -7,6 +7,7 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Status do
   alias Pleroma.Web.ApiSpec.Schemas.Account
   alias Pleroma.Web.ApiSpec.Schemas.Attachment
   alias Pleroma.Web.ApiSpec.Schemas.Emoji
+  alias Pleroma.Web.ApiSpec.Schemas.Event
   alias Pleroma.Web.ApiSpec.Schemas.FlakeID
   alias Pleroma.Web.ApiSpec.Schemas.Poll
   alias Pleroma.Web.ApiSpec.Schemas.Tag
@@ -152,6 +153,11 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Status do
             description:
               "A map consisting of alternate representations of the `content` property with the key being it's mimetype. Currently the only alternate representation supported is `text/plain`"
           },
+          content_type: %Schema{
+            type: :string,
+            nullable: true,
+            description: "A MIME type of the status"
+          },
           context: %Schema{
             type: :string,
             description: "The thread identifier the status is associated with"
@@ -181,6 +187,11 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Status do
               }
             }
           },
+          event: %Schema{
+            allOf: [Event],
+            nullable: true,
+            description: "The event attached to the status"
+          },
           expires_at: %Schema{
             type: :string,
             format: "date-time",
@@ -192,6 +203,30 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Status do
             type: :string,
             nullable: true,
             description: "The `acct` property of User entity for replied user (if any)"
+          },
+          quote: %Schema{
+            allOf: [%OpenApiSpex.Reference{"$ref": "#/components/schemas/Status"}],
+            nullable: true,
+            description: "Quoted status (if any)"
+          },
+          quote_id: %Schema{
+            nullable: true,
+            allOf: [FlakeID],
+            description: "ID of the status being quoted, if any"
+          },
+          quote_url: %Schema{
+            type: :string,
+            format: :uri,
+            nullable: true,
+            description: "URL of the quoted status"
+          },
+          quote_visible: %Schema{
+            type: :boolean,
+            description: "`true` if the quoted post is visible to the user"
+          },
+          quotes_count: %Schema{
+            type: :integer,
+            description: "How many statuses quoted this status"
           },
           local: %Schema{
             type: :boolean,
@@ -347,7 +382,8 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Status do
         "in_reply_to_account_acct" => nil,
         "local" => true,
         "spoiler_text" => %{"text/plain" => ""},
-        "thread_muted" => false
+        "thread_muted" => false,
+        "quotes_count" => 0
       },
       "poll" => nil,
       "reblog" => nil,

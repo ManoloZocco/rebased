@@ -19,6 +19,7 @@ defmodule Pleroma.Web.ActivityPub.Utils do
   alias Pleroma.Web.Router.Helpers
 
   import Ecto.Query
+  import Pleroma.Web.Utils.Guards, only: [not_empty_string: 1]
 
   require Logger
   require Pleroma.Constants
@@ -108,17 +109,23 @@ defmodule Pleroma.Web.ActivityPub.Utils do
     end
   end
 
-  def make_json_ld_header do
+  def make_json_ld_header(data \\ %{}) do
     %{
       "@context" => [
         "https://www.w3.org/ns/activitystreams",
         "#{Endpoint.url()}/schemas/litepub-0.1.jsonld",
         %{
-          "@language" => "und"
+          "@language" => get_language(data)
         }
       ]
     }
   end
+
+  defp get_language(%{"language" => language}) when not_empty_string(language) do
+    language
+  end
+
+  defp get_language(_), do: "und"
 
   def make_date do
     DateTime.utc_now() |> DateTime.to_iso8601()
@@ -440,6 +447,48 @@ defmodule Pleroma.Web.ActivityPub.Utils do
     end
   end
 
+  def add_participation_to_object(%Activity{data: %{"actor" => actor}}, object) do
+    [actor | fetch_participations(object)]
+    |> Enum.uniq()
+    |> update_participations_in_object(object)
+  end
+
+  def remove_participation_from_object(%Activity{data: %{"actor" => actor}}, object) do
+    List.delete(fetch_participations(object), actor)
+    |> update_participations_in_object(object)
+  end
+
+  defp update_participations_in_object(participations, object) do
+    update_element_in_object("participation", participations, object)
+  end
+
+  def update_participation_request_count_in_object(object) do
+    params = %{
+      type: "Join",
+      object: object.data["id"],
+      state: "pending"
+    }
+
+    count =
+      []
+      |> ActivityPub.fetch_activities_query(params)
+      |> Repo.aggregate(:count)
+
+    data = Map.put(object.data, "participation_request_count", count)
+
+    object
+    |> Changeset.change(data: data)
+    |> Object.update_and_set_cache()
+  end
+
+  defp fetch_participations(object) do
+    if is_list(object.data["participations"]) do
+      object.data["participations"]
+    else
+      []
+    end
+  end
+
   #### Follow-related helpers
 
   @doc """
@@ -720,14 +769,18 @@ defmodule Pleroma.Web.ActivityPub.Utils do
 
   #### Flag-related helpers
   @spec make_flag_data(map(), map()) :: map()
-  def make_flag_data(%{actor: actor, context: context, content: content} = params, additional) do
+  def make_flag_data(
+        %{actor: actor, context: context, content: content} = params,
+        additional
+      ) do
     %{
       "type" => "Flag",
       "actor" => actor.ap_id,
       "content" => content,
       "object" => build_flag_object(params),
       "context" => context,
-      "state" => "open"
+      "state" => "open",
+      "rules" => Map.get(params, :rules, nil)
     }
     |> Map.merge(additional)
   end
@@ -848,6 +901,34 @@ defmodule Pleroma.Web.ActivityPub.Utils do
 
   def update_report_state(_, _), do: {:error, "Unsupported state"}
 
+  def assign_report_to_account(%Activity{} = activity, nil = _account) do
+    new_data = Map.delete(activity.data, "assigned_account")
+
+    activity
+    |> Changeset.change(data: new_data)
+    |> Repo.update()
+  end
+
+  def assign_report_to_account(%Activity{} = activity, account) do
+    new_data = Map.put(activity.data, "assigned_account", account)
+
+    activity
+    |> Changeset.change(data: new_data)
+    |> Repo.update()
+  end
+
+  def assign_report_to_account(activity_ids, account) do
+    activities_num = length(activity_ids)
+
+    from(a in Activity, where: a.id in ^activity_ids)
+    |> update(set: [data: fragment("jsonb_set(data, '{assigned_account}', ?)", ^account)])
+    |> Repo.update_all([])
+    |> case do
+      {^activities_num, _} -> :ok
+      _ -> {:error, activity_ids}
+    end
+  end
+
   def strip_report_status_data(activity) do
     [actor | reported_activities] = activity.data["object"]
 
@@ -931,5 +1012,27 @@ defmodule Pleroma.Web.ActivityPub.Utils do
     |> where([a, object: o], fragment("(?)->>'inReplyTo' = ?", o.data, ^to_string(id)))
     |> where([a, object: o], fragment("(?)->>'type' = 'Answer'", o.data))
     |> Repo.all()
+  end
+
+  def get_existing_join(actor, id) do
+    actor
+    |> Activity.Queries.by_actor()
+    |> Activity.Queries.by_object_id(id)
+    |> Activity.Queries.by_type("Join")
+    |> order_by([activity], fragment("? desc nulls last", activity.id))
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  def update_join_state(
+        %Activity{} = activity,
+        state
+      ) do
+    new_data = Map.put(activity.data, "state", state)
+    changeset = Changeset.change(activity, data: new_data)
+
+    with {:ok, activity} <- Repo.update(changeset) do
+      {:ok, activity}
+    end
   end
 end

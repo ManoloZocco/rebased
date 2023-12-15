@@ -6,16 +6,20 @@ defmodule Pleroma.Web.MastodonAPI.InstanceControllerTest do
   # TODO: Should not need Cachex
   use Pleroma.Web.ConnCase
 
+  alias Pleroma.Rule
   alias Pleroma.User
   import Pleroma.Factory
 
   test "get instance information", %{conn: conn} do
+    clear_config([:auth, :oauth_consumer_strategies], [])
+
     conn = get(conn, "/api/v1/instance")
     assert result = json_response_and_validate_schema(conn, 200)
 
     email = Pleroma.Config.get([:instance, :email])
     thumbnail = Pleroma.Web.Endpoint.url() <> Pleroma.Config.get([:instance, :instance_thumbnail])
     background = Pleroma.Web.Endpoint.url() <> Pleroma.Config.get([:instance, :background_image])
+    favicon = Pleroma.Web.Endpoint.url() <> Pleroma.Config.get([:instance, :favicon])
 
     # Note: not checking for "max_toot_chars" since it's optional
     assert %{
@@ -39,20 +43,27 @@ defmodule Pleroma.Web.MastodonAPI.InstanceControllerTest do
              "background_upload_limit" => _,
              "banner_upload_limit" => _,
              "background_image" => from_config_background,
-             "shout_limit" => _,
-             "description_limit" => _
+             "description_limit" => _,
+             "rules" => _,
+             "pleroma" => %{
+               "favicon" => from_config_favicon
+             }
            } = result
 
+    assert result["version"] =~ "Pleroma"
     assert result["pleroma"]["metadata"]["account_activation_required"] != nil
     assert result["pleroma"]["metadata"]["features"]
     assert result["pleroma"]["metadata"]["federation"]
     assert result["pleroma"]["metadata"]["fields_limits"]
     assert result["pleroma"]["vapid_public_key"]
     assert result["pleroma"]["stats"]["mau"] == 0
+    assert result["pleroma"]["oauth_consumer_strategies"] == []
+    assert result["soapbox"]["version"] =~ "."
 
     assert email == from_config_email
     assert thumbnail == from_config_thumbnail
     assert background == from_config_background
+    assert favicon == from_config_favicon
   end
 
   test "get instance stats", %{conn: conn} do
@@ -93,6 +104,84 @@ defmodule Pleroma.Web.MastodonAPI.InstanceControllerTest do
     assert ["peer1.com", "peer2.com"] == Enum.sort(result)
   end
 
+  test "get instance rules", %{conn: conn} do
+    Rule.create(%{text: "Example rule"})
+    Rule.create(%{text: "Second rule"})
+    Rule.create(%{text: "Third rule"})
+
+    conn = get(conn, "/api/v1/instance")
+
+    assert result = json_response_and_validate_schema(conn, 200)
+
+    rules = result["rules"]
+
+    assert length(rules) == 3
+  end
+
+  test "get instance configuration", %{conn: conn} do
+    clear_config([:instance, :limit], 476)
+
+    conn = get(conn, "/api/v1/instance")
+
+    assert result = json_response_and_validate_schema(conn, 200)
+
+    assert result["configuration"]["statuses"]["max_characters"] == 476
+  end
+
+  test "get oauth_consumer_strategies", %{conn: conn} do
+    clear_config([:auth, :oauth_consumer_strategies], ["keycloak"])
+
+    conn = get(conn, "/api/v1/instance")
+
+    assert result = json_response_and_validate_schema(conn, 200)
+
+    assert result["pleroma"]["oauth_consumer_strategies"] == ["keycloak"]
+  end
+
+  test "get instance contact information", %{conn: conn} do
+    user = insert(:user, %{local: true})
+
+    clear_config([:instance, :contact_username], user.nickname)
+
+    conn = get(conn, "/api/v1/instance")
+
+    assert result = json_response_and_validate_schema(conn, 200)
+
+    assert result["contact_account"]["id"] == user.id
+  end
+
+  test "get instance information v2", %{conn: conn} do
+    assert get(conn, "/api/v2/instance")
+           |> json_response_and_validate_schema(200)
+  end
+
+  describe "instance domain blocks" do
+    setup do
+      clear_config([:mrf_simple, :reject], [{"fediverse.pl", "uses Soapbox"}])
+    end
+
+    test "get instance domain blocks", %{conn: conn} do
+      conn = get(conn, "/api/v1/instance/domain_blocks")
+
+      assert [
+               %{
+                 "comment" => "uses Soapbox",
+                 "digest" => "55e3f44aefe7eb022d3b1daaf7396cabf7f181bf6093c8ea841e30c9fc7d8226",
+                 "domain" => "fediverse.pl",
+                 "severity" => "suspend"
+               }
+             ] == json_response_and_validate_schema(conn, 200)
+    end
+
+    test "returns empty array if mrf transparency is disabled", %{conn: conn} do
+      clear_config([:mrf, :transparency], false)
+
+      conn = get(conn, "/api/v1/instance/domain_blocks")
+
+      assert [] == json_response_and_validate_schema(conn, 200)
+    end
+  end
+
   test "instance languages", %{conn: conn} do
     assert %{"languages" => ["en"]} =
              conn
@@ -105,5 +194,24 @@ defmodule Pleroma.Web.MastodonAPI.InstanceControllerTest do
              conn
              |> get("/api/v1/instance")
              |> json_response_and_validate_schema(200)
+  end
+
+  test "translation languages matrix", %{conn: conn} do
+    clear_config([Pleroma.Language.Translation, :provider], TranslationMock)
+
+    assert %{"en" => ["pl"], "pl" => ["en"]} =
+             conn
+             |> get("/api/v1/instance/translation_languages")
+             |> json_response_and_validate_schema(200)
+  end
+
+  test "restrict_unauthenticated", %{conn: conn} do
+    result =
+      conn
+      |> get("/api/v1/instance")
+      |> json_response_and_validate_schema(200)
+
+    assert result["pleroma"]["metadata"]["restrict_unauthenticated"]["timelines"]["local"] ==
+             false
   end
 end

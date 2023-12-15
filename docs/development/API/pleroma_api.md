@@ -577,9 +577,6 @@ The status posting endpoint takes an additional parameter, `in_reply_to_conversa
   404 if the pack does not exist
 
 ## `GET /api/v1/pleroma/accounts/:id/scrobbles`
-
-Audio scrobbling in Pleroma is **deprecated**.
-
 ### Requests a list of current and recent Listen activities for an account
 * Method `GET`
 * Authentication: not required
@@ -601,9 +598,6 @@ Audio scrobbling in Pleroma is **deprecated**.
 ```
 
 ## `POST /api/v1/pleroma/scrobble`
-
-Audio scrobbling in Pleroma is **deprecated**.
-
 ### Creates a new Listen activity for an account
 * Method `POST`
 * Authentication: required
@@ -731,42 +725,3 @@ Emoji reactions work a lot like favourites do. They make it possible to react to
 * Authentication: required
 * Params: none
 * Response: HTTP 200 on success, 500 on error
-
-## `/api/v1/pleroma/settings/:app`
-### Gets settings for some application
-* Method `GET`
-* Authentication: `read:accounts`
-
-* Response: JSON. The settings for that application, or empty object if there is none.
-* Example response:
-```json
-{
-  "some key": "some value"
-}
-```
-
-### Updates settings for some application
-* Method `PATCH`
-* Authentication: `write:accounts`
-* Request body: JSON object. The object will be merged recursively with old settings. If some field is set to null, it is removed.
-* Example request:
-```json
-{
-  "some key": "some value",
-  "key to remove": null,
-  "nested field": {
-    "some key": "some value",
-    "key to remove": null
-  }
-}
-```
-* Response: JSON. Updated (merged) settings for that application.
-* Example response:
-```json
-{
-  "some key": "some value",
-  "nested field": {
-    "some key": "some value",
-  }
-}
-```

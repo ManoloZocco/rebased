@@ -567,6 +567,12 @@ config :pleroma, :config_description, [
         ]
       },
       %{
+        key: :contact_username,
+        type: :string,
+        description: "Instance owner username",
+        suggestions: ["admin"]
+      },
+      %{
         key: :limit,
         type: :integer,
         description: "Posts character limit (CW/Subject included in the counter)",
@@ -862,6 +868,14 @@ config :pleroma, :config_description, [
         ]
       },
       %{
+        key: :user_location_length,
+        type: :integer,
+        description: "A user location maximum length. Default: 50.",
+        suggestions: [
+          50
+        ]
+      },
+      %{
         key: :skip_thread_containment,
         type: :boolean,
         description: "Skip filtering out broken threads. Default: enabled."
@@ -988,6 +1002,13 @@ config :pleroma, :config_description, [
         suggestions: ["/instance/thumbnail.jpeg"]
       },
       %{
+        key: :favicon,
+        type: {:string, :image},
+        description:
+          "Shortcut icon displayed in the browser, and possibly displayed by other instances.",
+        suggestions: ["/favicon.png"]
+      },
+      %{
         key: :show_reactions,
         type: :boolean,
         description: "Let favourites and emoji reactions be viewed through the API."
@@ -1052,6 +1073,13 @@ config :pleroma, :config_description, [
         description:
           "Minimum required age (in days) for users to create account. Only used if birthday is required.",
         suggestions: [6570]
+      },
+      %{
+        key: :migration_cooldown_period,
+        type: :integer,
+        description:
+          "Number of days for which users won't be able to migrate account again after successful migration.",
+        suggestions: [30]
       },
       %{
         key: :languages,
@@ -1946,6 +1974,8 @@ config :pleroma, :config_description, [
           federator_outgoing: 50,
           mailer: 10,
           scheduled_activities: 10,
+          poll_notifications: 10,
+          notifications: 20,
           transmogrifier: 20,
           web_push: 50
         ],
@@ -1997,6 +2027,18 @@ config :pleroma, :config_description, [
             type: :integer,
             description: "Scheduled activities queue, see Pleroma.ScheduledActivities",
             suggestions: [10]
+          },
+          %{
+            key: :poll_notifications,
+            type: :integer,
+            description: "Stores poll expirations so it can notify users when a poll ends",
+            suggestions: [10]
+          },
+          %{
+            key: :notifications,
+            type: :integer,
+            description: "Creates notifications for activities in the background",
+            suggestions: [20]
           },
           %{
             key: :transmogrifier,
@@ -2076,6 +2118,12 @@ config :pleroma, :config_description, [
         key: :enabled,
         type: :boolean,
         description: "Enables RichMedia parsing of URLs"
+      },
+      %{
+        key: :oembed_providers_enabled,
+        type: :boolean,
+        description:
+          "Embed rich media from a list of known providers. This takes precedence over other parsers."
       },
       %{
         key: :ignore_hosts,
@@ -2621,6 +2669,12 @@ config :pleroma, :config_description, [
         suggestions: [{1000, 10}, [{10_000, 10}, {10_000, 50}]]
       },
       %{
+        key: :events_actions,
+        type: [:tuple, {:list, :tuple}],
+        description: "For create / update / join / leave actions on any statuses",
+        suggestions: [{1000, 10}, [{10_000, 10}, {10_000, 50}]]
+      },
+      %{
         key: :authentication,
         type: [:tuple, {:list, :tuple}],
         description: "For authentication create / password check / user existence check requests",
@@ -2672,27 +2726,6 @@ config :pleroma, :config_description, [
             type: {:list, :string},
             suggestions: ["activity+json"]
           }
-        ]
-      }
-    ]
-  },
-  %{
-    group: :pleroma,
-    key: :shout,
-    type: :group,
-    description: "Pleroma shout settings",
-    children: [
-      %{
-        key: :enabled,
-        type: :boolean,
-        description: "Enables the backend Shoutbox chat feature."
-      },
-      %{
-        key: :limit,
-        type: :integer,
-        description: "Shout message character limit.",
-        suggestions: [
-          5_000
         ]
       }
     ]
@@ -3464,6 +3497,238 @@ config :pleroma, :config_description, [
             suggestion: [5]
           }
         ]
+      },
+      %{
+        key: Pleroma.Webhook.Notify,
+        type: :keyword,
+        description: "Concurrent limits configuration for webhooks.",
+        suggestions: [max_running: 5, max_waiting: 5],
+        children: [
+          %{
+            key: :max_running,
+            type: :integer,
+            description: "Max running concurrently jobs.",
+            suggestion: [5]
+          },
+          %{
+            key: :max_waiting,
+            type: :integer,
+            description: "Max waiting jobs.",
+            suggestion: [5]
+          }
+        ]
+      }
+    ]
+  },
+  %{
+    group: :pleroma,
+    key: Pleroma.Web.WebFinger,
+    type: :group,
+    description: "Webfinger",
+    children: [
+      %{
+        key: :update_nickname_on_user_fetch,
+        type: :boolean,
+        description: "Update nickname according to host-meta, when refetching the user"
+      }
+    ]
+  },
+  %{
+    group: :pleroma,
+    key: Pleroma.Language.Translation,
+    type: :group,
+    description: "Translation providers",
+    children: [
+      %{
+        key: :provider,
+        type: :module,
+        suggestions: [
+          Pleroma.Language.Translation.Deepl,
+          Pleroma.Language.Translation.Libretranslate
+        ]
+      },
+      %{
+        key: :allow_unauthenticated,
+        type: :boolean,
+        label: "Allow unauthenticated",
+        description: "Whether to let unauthenticated users translate posts"
+      },
+      %{
+        key: :allow_remote,
+        type: :boolean,
+        label: "Allow remote",
+        description: "Whether to allow translation of remote posts"
+      },
+      %{
+        group: {:subgroup, Pleroma.Language.Translation.Deepl},
+        key: :base_url,
+        label: "DeepL base URL",
+        type: :string,
+        suggestions: ["https://api-free.deepl.com", "https://api.deepl.com"]
+      },
+      %{
+        group: {:subgroup, Pleroma.Language.Translation.Deepl},
+        key: :api_key,
+        label: "DeepL API Key",
+        type: :string,
+        suggestions: ["YOUR_API_KEY"]
+      },
+      %{
+        group: {:subgroup, Pleroma.Language.Translation.Libretranslate},
+        key: :base_url,
+        label: "LibreTranslate instance URL",
+        type: :string,
+        suggestions: ["https://libretranslate.com"]
+      },
+      %{
+        group: {:subgroup, Pleroma.Language.Translation.Libretranslate},
+        key: :api_key,
+        label: "LibreTranslate API Key",
+        type: :string,
+        suggestions: ["YOUR_API_KEY"]
+      }
+    ]
+  },
+  %{
+    group: :pleroma,
+    key: Pleroma.Language.LanguageDetector,
+    type: :group,
+    description: "Language detection providers",
+    children: [
+      %{
+        key: :provider,
+        type: :module,
+        label: "Language detection provider",
+        suggestions: [
+          Pleroma.Language.LanguageDetector.Fasttext
+        ]
+      },
+      %{
+        group: {:subgroup, Pleroma.Language.LanguageDetector.Fasttext},
+        key: :model,
+        label: "fastText language detection model",
+        type: :string,
+        suggestions: ["/usr/share/fasttext/lid.176.bin"]
+      }
+    ]
+  },
+  %{
+    group: :geospatial,
+    key: Geospatial.Service,
+    type: :group,
+    description: "Geospatial service providers",
+    children: [
+      %{
+        key: :service,
+        type: :module,
+        label: "Geospatial service provider",
+        suggestions: [
+          Geospatial.Providers.GoogleMaps,
+          Geospatial.Providers.Nominatim,
+          Geospatial.Providers.Pelias
+        ]
+      }
+    ]
+  },
+  %{
+    group: :geospatial,
+    key: Geospatial.Providers.Nominatim,
+    type: :group,
+    description: "Nominatim provider configuration",
+    children: [
+      %{
+        key: :endpoint,
+        type: :string,
+        description: "Nominatim endpoint",
+        suggestions: ["https://nominatim.openstreetmap.org"]
+      },
+      %{
+        key: :api_key,
+        type: :string,
+        description: "Nominatim API key",
+        suggestions: [nil]
+      }
+    ]
+  },
+  %{
+    group: :geospatial,
+    key: Geospatial.Providers.GoogleMaps,
+    type: :group,
+    description: "Google Maps provider configuration",
+    children: [
+      %{
+        key: :api_key,
+        type: :string,
+        description: "Google Maps API key",
+        suggestions: [nil]
+      },
+      %{
+        key: :fetch_place_details,
+        type: :boolean,
+        description: "Fetch place details"
+      }
+    ]
+  },
+  %{
+    group: :geospatial,
+    key: Geospatial.Providers.Pelias,
+    type: :group,
+    description: "Pelias provider configuration",
+    children: [
+      %{
+        key: :endpoint,
+        type: :string,
+        description: "Pelias endpoint",
+        suggestions: ["https://api.geocode.earth"]
+      },
+      %{
+        key: :api_key,
+        type: :string,
+        description: "Pelias API key",
+        suggestions: [nil]
+      }
+    ]
+  },
+  %{
+    group: :pleroma,
+    key: Pleroma.Search,
+    type: :group,
+    description: "General search settings.",
+    children: [
+      %{
+        key: :module,
+        type: :keyword,
+        description: "Selected search module.",
+        suggestion: [Pleroma.Search.DatabaseSearch, Pleroma.Search.Meilisearch]
+      }
+    ]
+  },
+  %{
+    group: :pleroma,
+    key: Pleroma.Search.Meilisearch,
+    type: :group,
+    description: "Meilisearch settings.",
+    children: [
+      %{
+        key: :url,
+        type: :string,
+        description: "Meilisearch URL.",
+        suggestion: ["http://127.0.0.1:7700/"]
+      },
+      %{
+        key: :private_key,
+        type: :string,
+        description:
+          "Private key for meilisearch authentication, or `nil` to disable private key authentication.",
+        suggestion: [nil]
+      },
+      %{
+        key: :initial_indexing_chunk_size,
+        type: :int,
+        description:
+          "Amount of posts in a batch when running the initial indexing operation. Should probably not be more than 100000" <>
+            " since there's a limit on maximum insert size",
+        suggestion: [100_000]
       }
     ]
   }

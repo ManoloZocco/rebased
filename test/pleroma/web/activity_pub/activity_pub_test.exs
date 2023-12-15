@@ -16,6 +16,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubTest do
   alias Pleroma.Web.ActivityPub.Utils
   alias Pleroma.Web.AdminAPI.AccountView
   alias Pleroma.Web.CommonAPI
+  alias Pleroma.Webhook.Notify
 
   import ExUnit.CaptureLog
   import Mock
@@ -23,6 +24,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubTest do
   import Tesla.Mock
 
   setup do
+    Mox.stub_with(Pleroma.UnstubbedConfigMock, Pleroma.Config)
     mock(fn env -> apply(HttpRequestMock, :request, [env]) end)
     :ok
   end
@@ -408,6 +410,26 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubTest do
 
       assert user.birthday == ~D[2001-02-12]
     end
+
+    test "fetches user location information from misskey" do
+      user_id = "https://misskey.io/@mkljczk"
+
+      Tesla.Mock.mock(fn
+        %{
+          method: :get,
+          url: ^user_id
+        } ->
+          %Tesla.Env{
+            status: 200,
+            body: File.read!("test/fixtures/birthdays/misskey-user.json"),
+            headers: [{"content-type", "application/activity+json"}]
+          }
+      end)
+
+      {:ok, user} = ActivityPub.make_user_from_ap_id(user_id)
+
+      assert user.location == "Poland"
+    end
   end
 
   test "it fetches the appropriate tag-restricted posts" do
@@ -769,6 +791,34 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubTest do
       {:ok, _} = CommonAPI.post(user2, Map.put(reply_data, :visibility, "direct"))
       assert %{data: _data, object: object} = Activity.get_by_ap_id_with_object(ap_id)
       assert object.data["repliesCount"] == 2
+    end
+
+    test "increases quotes count", %{user: user} do
+      user2 = insert(:user)
+
+      {:ok, activity} = CommonAPI.post(user, %{status: "1", visibility: "public"})
+      ap_id = activity.data["id"]
+      quote_data = %{status: "1", quote_id: activity.id}
+
+      # public
+      {:ok, _} = CommonAPI.post(user2, Map.put(quote_data, :visibility, "public"))
+      assert %{data: _data, object: object} = Activity.get_by_ap_id_with_object(ap_id)
+      assert object.data["quotesCount"] == 1
+
+      # unlisted
+      {:ok, _} = CommonAPI.post(user2, Map.put(quote_data, :visibility, "unlisted"))
+      assert %{data: _data, object: object} = Activity.get_by_ap_id_with_object(ap_id)
+      assert object.data["quotesCount"] == 2
+
+      # private
+      {:ok, _} = CommonAPI.post(user2, Map.put(quote_data, :visibility, "private"))
+      assert %{data: _data, object: object} = Activity.get_by_ap_id_with_object(ap_id)
+      assert object.data["quotesCount"] == 2
+
+      # direct
+      {:ok, _} = CommonAPI.post(user2, Map.put(quote_data, :visibility, "direct"))
+      assert %{data: _data, object: object} = Activity.get_by_ap_id_with_object(ap_id)
+      assert object.data["quotesCount"] == 2
     end
   end
 
@@ -1621,6 +1671,29 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubTest do
       assert Repo.aggregate(Object, :count, :id) == 1
       assert Repo.aggregate(Notification, :count, :id) == 0
     end
+
+    test_with_mock "triggers webhooks",
+                   %{
+                     reporter: reporter,
+                     context: context,
+                     target_account: target_account,
+                     reported_activity: reported_activity,
+                     content: content
+                   },
+                   Notify,
+                   [:passthrough],
+                   trigger_webhooks: fn _, _ -> nil end do
+      {:ok, activity} =
+        ActivityPub.flag(%{
+          actor: reporter,
+          context: context,
+          account: target_account,
+          statuses: [reported_activity],
+          content: content
+        })
+
+      assert_called(Notify.trigger_webhooks(activity, :"report.created"))
+    end
   end
 
   test "fetch_activities/2 returns activities addressed to a list " do
@@ -1820,6 +1893,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubTest do
   end
 
   describe "Move activity" do
+    @tag :erratic
     test "create" do
       %{ap_id: old_ap_id} = old_user = insert(:user)
       %{ap_id: new_ap_id} = new_user = insert(:user, also_known_as: [old_ap_id])
@@ -1856,7 +1930,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPubTest do
 
       assert_enqueued(worker: Pleroma.Workers.BackgroundWorker, args: params)
 
-      Pleroma.Workers.BackgroundWorker.perform(%Oban.Job{args: params})
+      Pleroma.Tests.ObanHelpers.perform_all()
 
       refute User.following?(follower, old_user)
       assert User.following?(follower, new_user)

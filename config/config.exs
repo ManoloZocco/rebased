@@ -110,17 +110,6 @@ config :pleroma, :uri_schemes,
     "xmpp"
   ]
 
-websocket_config = [
-  path: "/websocket",
-  serializer: [
-    {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
-    {Phoenix.Socket.V2.JSONSerializer, "~> 2.0.0"}
-  ],
-  timeout: 60_000,
-  transport_log: false,
-  compress: false
-]
-
 # Configures the endpoint
 config :pleroma, Pleroma.Web.Endpoint,
   url: [host: "localhost"],
@@ -130,10 +119,7 @@ config :pleroma, Pleroma.Web.Endpoint,
       {:_,
        [
          {"/api/v1/streaming", Pleroma.Web.MastodonAPI.WebsocketHandler, []},
-         {"/websocket", Phoenix.Endpoint.CowboyWebSocket,
-          {Phoenix.Transports.WebSocket,
-           {Pleroma.Web.Endpoint, Pleroma.Web.UserSocket, websocket_config}}},
-         {:_, Phoenix.Endpoint.Cowboy2Handler, {Pleroma.Web.Endpoint, []}}
+         {:_, Plug.Cowboy.Handler, {Pleroma.Web.Endpoint, []}}
        ]}
     ]
   ],
@@ -184,7 +170,8 @@ config :pleroma, :instance,
   description: "Pleroma: An efficient and flexible fediverse server",
   short_description: "",
   background_image: "/images/city.jpg",
-  instance_thumbnail: "/instance/thumbnail.jpeg",
+  instance_thumbnail: "/instance/thumbnail.png",
+  favicon: "/favicon.png",
   limit: 5_000,
   description_limit: 5_000,
   remote_limit: 100_000,
@@ -201,7 +188,7 @@ config :pleroma, :instance,
   registrations_open: true,
   invites_enabled: false,
   account_activation_required: false,
-  account_approval_required: false,
+  account_approval_required: true,
   federating: true,
   federation_incoming_replies_max_depth: 100,
   federation_reachability_timeout_days: 7,
@@ -231,6 +218,7 @@ config :pleroma, :instance,
   limit_to_local_content: :unauthenticated,
   user_bio_length: 5000,
   user_name_length: 100,
+  user_location_length: 50,
   max_account_fields: 10,
   max_remote_account_fields: 20,
   account_field_name_length: 512,
@@ -269,11 +257,27 @@ config :pleroma, :instance,
     :emoji_manage_emoji,
     :statistics_read
   ],
-  moderator_privileges: [:messages_delete, :reports_manage_reports],
+  moderator_privileges: [
+    :users_read,
+    :users_manage_invites,
+    :users_manage_activation_state,
+    :users_manage_tags,
+    :users_manage_credentials,
+    :users_delete,
+    :messages_read,
+    :messages_delete,
+    :instances_delete,
+    :reports_manage_reports,
+    :moderation_log_read,
+    :announcements_manage_announcements,
+    :emoji_manage_emoji,
+    :statistics_read
+  ],
   max_endorsed_users: 20,
   birthday_required: false,
   birthday_min_age: 0,
-  max_media_attachments: 1_000
+  max_media_attachments: 1_000,
+  migration_cooldown_period: 30
 
 config :pleroma, :welcome,
   direct_message: [
@@ -301,9 +305,7 @@ config :pleroma, :feed,
   }
 
 config :pleroma, :markup,
-  # XXX - unfortunately, inline images must be enabled by default right now, because
-  # of custom emoji.  Issue #275 discusses defanging that somehow.
-  allow_inline_images: true,
+  allow_inline_images: false,
   allow_headings: false,
   allow_tables: false,
   allow_fonts: false,
@@ -432,16 +434,35 @@ config :pleroma, :mrf_object_age,
   threshold: 604_800,
   actions: [:delist, :strip_followers]
 
+config :pleroma, :mrf_nsfw_api,
+  url: "http://127.0.0.1:5000/",
+  threshold: 0.7,
+  mark_sensitive: true,
+  unlist: false,
+  reject: false
+
 config :pleroma, :mrf_follow_bot, follower_nickname: nil
+
+config :pleroma, :mrf_inline_quote, template: "<bdi>RT:</bdi> {url}"
+
+config :pleroma, :mrf_remote_report,
+  reject_all: false,
+  reject_anonymous: true,
+  reject_empty_message: true
+
+config :pleroma, :mrf_anti_duplication,
+  ttl: 60_000,
+  min_length: 50
 
 config :pleroma, :rich_media,
   enabled: true,
   ignore_hosts: [],
   ignore_tld: ["local", "localdomain", "lan"],
   parsers: [
-    Pleroma.Web.RichMedia.Parsers.TwitterCard,
-    Pleroma.Web.RichMedia.Parsers.OEmbed
+    Pleroma.Web.RichMedia.Parsers.OEmbed,
+    Pleroma.Web.RichMedia.Parsers.TwitterCard
   ],
+  oembed_providers_enabled: true,
   failure_backoff: 60_000,
   ttl_setters: [Pleroma.Web.RichMedia.Parser.TTL.AwsSignedUrl]
 
@@ -480,11 +501,7 @@ config :pleroma, :media_preview_proxy,
   image_quality: 85,
   min_content_length: 100 * 1024
 
-config :pleroma, :shout,
-  enabled: true,
-  limit: 5_000
-
-config :phoenix, :format_encoders, json: Jason, "activity+json": Jason
+config :phoenix, :format_encoders, json: Jason, "activity+json": Jason, ics: ICalendar
 
 config :phoenix, :json_library, Jason
 
@@ -577,19 +594,21 @@ config :pleroma, Oban,
     token_expiration: 5,
     filter_expiration: 1,
     backup: 1,
-    federator_incoming: 5,
-    federator_outgoing: 5,
+    federator_incoming: 50,
+    federator_outgoing: 50,
     ingestion_queue: 50,
     web_push: 50,
     mailer: 10,
     transmogrifier: 20,
     scheduled_activities: 10,
     poll_notifications: 10,
+    notifications: 20,
     background: 5,
     remote_fetcher: 2,
     attachments_cleanup: 1,
     new_users_digest: 1,
-    mute_expire: 5
+    mute_expire: 5,
+    search_indexing: 10
   ],
   plugins: [Oban.Plugins.Pruner],
   crontab: [
@@ -600,7 +619,8 @@ config :pleroma, Oban,
 config :pleroma, :workers,
   retries: [
     federator_incoming: 5,
-    federator_outgoing: 5
+    federator_outgoing: 5,
+    search_indexing: 2
   ]
 
 config :pleroma, Pleroma.Formatter,
@@ -633,7 +653,14 @@ ueberauth_providers =
   for strategy <- oauth_consumer_strategies do
     strategy_module_name = "Elixir.Ueberauth.Strategy.#{String.capitalize(strategy)}"
     strategy_module = String.to_atom(strategy_module_name)
-    {String.to_atom(strategy), {strategy_module, [callback_params: ["state"]]}}
+
+    params =
+      case strategy do
+        "keycloak" -> [uid_field: :email, default_scope: "openid profile"]
+        _ -> [callback_params: ["state"]]
+      end
+
+    {String.to_atom(strategy), {strategy_module, params}}
   end
 
 config :ueberauth,
@@ -642,6 +669,10 @@ config :ueberauth,
        providers: ueberauth_providers
 
 config :pleroma, :auth, oauth_consumer_strategies: oauth_consumer_strategies
+
+config :pleroma, :auth, basic_auth: false
+
+config :pleroma, :auth, mongoose_im: false
 
 config :pleroma, Pleroma.Emails.Mailer, adapter: Swoosh.Adapters.Sendmail, enabled: false
 
@@ -704,6 +735,7 @@ config :pleroma, :rate_limit,
   relation_id_action: {60_000, 2},
   statuses_actions: {10_000, 15},
   status_id_action: {60_000, 3},
+  events_actions: {10_000, 15},
   password_reset: {1_800_000, 5},
   account_confirmation_resend: {8_640_000, 5},
   ap_routes: {60_000, 15}
@@ -775,9 +807,8 @@ config :pleroma, :frontends,
       "name" => "soapbox",
       "git" => "https://gitlab.com/soapbox-pub/soapbox",
       "build_url" =>
-        "https://gitlab.com/soapbox-pub/soapbox/-/jobs/artifacts/${ref}/download?job=build-production",
-      "ref" => "v3.0.0-beta.1",
-      "build_dir" => "static"
+        "https://gitlab.com/soapbox-pub/soapbox/-/jobs/artifacts/${ref}/download?job=build",
+      "ref" => "main"
     },
     "glitch-lily" => %{
       "name" => "glitch-lily",
@@ -858,7 +889,11 @@ config :pleroma, :restrict_unauthenticated,
 config :pleroma, Pleroma.Web.ApiSpec.CastAndValidate, strict: false
 
 config :pleroma, :mrf,
-  policies: [Pleroma.Web.ActivityPub.MRF.ObjectAgePolicy, Pleroma.Web.ActivityPub.MRF.TagPolicy],
+  policies: [
+    Pleroma.Web.ActivityPub.MRF.ObjectAgePolicy,
+    Pleroma.Web.ActivityPub.MRF.TagPolicy,
+    Pleroma.Web.ActivityPub.MRF.InlineQuotePolicy
+  ],
   transparency: true,
   transparency_exclusions: []
 
@@ -883,10 +918,39 @@ config :pleroma, Pleroma.User.Backup,
 
 config :pleroma, ConcurrentLimiter, [
   {Pleroma.Web.RichMedia.Helpers, [max_running: 5, max_waiting: 5]},
-  {Pleroma.Web.ActivityPub.MRF.MediaProxyWarmingPolicy, [max_running: 5, max_waiting: 5]}
+  {Pleroma.Web.ActivityPub.MRF.MediaProxyWarmingPolicy, [max_running: 5, max_waiting: 5]},
+  {Pleroma.Search, [max_running: 30, max_waiting: 50]},
+  {Pleroma.Webhook.Notify, [max_running: 5, max_waiting: 200]}
 ]
 
-config :pleroma, Pleroma.Web.WebFinger, domain: nil, update_nickname_on_user_fetch: true
+config :pleroma, Pleroma.Web.WebFinger, domain: nil, update_nickname_on_user_fetch: false
+
+config :pleroma, Pleroma.Language.Translation, allow_unauthenticated: false, allow_remote: true
+
+config :geospatial, Geospatial.Service, service: Geospatial.Providers.Nominatim
+
+config :geospatial, Geospatial.Providers.GoogleMaps,
+  api_key: nil,
+  fetch_place_details: true
+
+config :geospatial, Geospatial.Providers.Nominatim,
+  endpoint: "https://nominatim.openstreetmap.org",
+  api_key: nil
+
+config :geospatial, Geospatial.Providers.Pelias,
+  endpoint: "https://api.geocode.earth",
+  api_key: nil
+
+config :geospatial, Geospatial.HTTP, user_agent: &Pleroma.Application.user_agent/0
+
+import_config "soapbox.exs"
+
+config :pleroma, Pleroma.Search, module: Pleroma.Search.DatabaseSearch
+
+config :pleroma, Pleroma.Search.Meilisearch,
+  url: "http://127.0.0.1:7700/",
+  private_key: nil,
+  initial_indexing_chunk_size: 100_000
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

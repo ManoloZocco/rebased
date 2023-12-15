@@ -11,7 +11,12 @@ defmodule Pleroma.Workers.Cron.DigestEmailsWorkerTest do
   alias Pleroma.User
   alias Pleroma.Web.CommonAPI
 
-  setup do: clear_config([:email_notifications, :digest])
+  setup do
+    clear_config([:email_notifications, :digest])
+
+    Mox.stub_with(Pleroma.UnstubbedConfigMock, Pleroma.Config)
+    :ok
+  end
 
   setup do
     clear_config([:email_notifications, :digest], %{
@@ -30,6 +35,7 @@ defmodule Pleroma.Workers.Cron.DigestEmailsWorkerTest do
     user2 = insert(:user, last_digest_emailed_at: date)
     {:ok, _} = User.switch_email_notifications(user2, "digest", true)
     CommonAPI.post(user, %{status: "hey @#{user2.nickname}!"})
+    ObanHelpers.perform_all()
 
     {:ok, user2: user2}
   end

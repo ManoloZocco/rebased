@@ -16,7 +16,7 @@ config :pleroma, Pleroma.Captcha,
 
 # Print only warnings and errors during test
 config :logger, :console,
-  level: :warn,
+  level: :warning,
   format: "\n[$level] $message\n"
 
 config :pleroma, :auth, oauth_consumer_strategies: []
@@ -31,10 +31,14 @@ config :pleroma, Pleroma.Uploaders.Local, uploads: "test/uploads"
 config :pleroma, Pleroma.Emails.Mailer, adapter: Swoosh.Adapters.Test, enabled: true
 
 config :pleroma, :instance,
+  name: "Pleroma",
+  description: "Pleroma: An efficient and flexible fediverse server",
+  instance_thumbnail: "/instance/thumbnail.jpeg",
   email: "admin@example.com",
   notify_email: "noreply@example.com",
   skip_thread_containment: false,
   federating: false,
+  account_approval_required: false,
   external_user_synchronization: false,
   static_dir: "test/instance_static/"
 
@@ -57,6 +61,8 @@ config :pleroma, :dangerzone, override_repo_pool_size: true
 config :pleroma, :password, iterations: 1
 
 config :tesla, adapter: Tesla.Mock
+
+config :tesla, Geospatial.HTTP, adapter: Tesla.Mock
 
 config :pleroma, :rich_media,
   enabled: false,
@@ -117,6 +123,8 @@ config :tzdata, :autoupdate, :disabled
 
 config :pleroma, :mrf, policies: []
 
+config :pleroma, :instances_favicons, enabled: false
+
 config :pleroma, :pipeline,
   object_validator: Pleroma.Web.ActivityPub.ObjectValidatorMock,
   mrf: Pleroma.Web.ActivityPub.MRFMock,
@@ -133,9 +141,19 @@ config :pleroma, :side_effects,
   ap_streamer: Pleroma.Web.ActivityPub.ActivityPubMock,
   logger: Pleroma.LoggerMock
 
+config :pleroma, Pleroma.Search, module: Pleroma.Search.DatabaseSearch
+
+config :pleroma, Pleroma.Search.Meilisearch, url: "http://127.0.0.1:7700/", private_key: nil
+
 # Reduce recompilation time
 # https://dashbit.co/blog/speeding-up-re-compilation-of-elixir-projects
 config :phoenix, :plug_init_mode, :runtime
+
+# Allow inline images in tests (for now).
+# FIXME: rework/remove tests that depend on this.
+config :pleroma, :markup, allow_inline_images: true
+
+config :pleroma, :config_impl, Pleroma.UnstubbedConfigMock
 
 if File.exists?("./config/test.secret.exs") do
   import_config "test.secret.exs"

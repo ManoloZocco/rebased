@@ -11,13 +11,20 @@ defmodule Pleroma.UserTest do
   alias Pleroma.User
   alias Pleroma.Web.ActivityPub.ActivityPub
   alias Pleroma.Web.CommonAPI
+  alias Pleroma.Webhook.Notify
 
   use Pleroma.DataCase, async: false
   use Oban.Testing, repo: Pleroma.Repo
 
   import Pleroma.Factory
   import ExUnit.CaptureLog
+  import Mock
   import Swoosh.TestAssertions
+
+  setup do
+    Mox.stub_with(Pleroma.UnstubbedConfigMock, Pleroma.Config)
+    :ok
+  end
 
   setup_all do
     Tesla.Mock.mock_global(fn env -> apply(HttpRequestMock, :request, [env]) end)
@@ -714,6 +721,24 @@ defmodule Pleroma.UserTest do
 
       assert user.is_confirmed
     end
+
+    test "it sets 'accepts_email_list'" do
+      params = Map.put_new(@full_user_data, :accepts_email_list, true)
+      changeset = User.register_changeset(%User{}, params)
+      assert changeset.valid?
+
+      {:ok, user} = Repo.insert(changeset)
+
+      assert user.accepts_email_list
+    end
+
+    test_with_mock "triggers webhooks", Notify, trigger_webhooks: fn _, _ -> nil end do
+      cng = User.register_changeset(%User{}, @full_user_data)
+
+      {:ok, registered_user} = User.register(cng)
+
+      assert_called(Notify.trigger_webhooks(registered_user, :"account.created"))
+    end
   end
 
   describe "user registration, with :account_activation_required" do
@@ -785,6 +810,17 @@ defmodule Pleroma.UserTest do
       changeset = User.register_changeset(%User{}, params)
 
       refute changeset.valid?
+    end
+  end
+
+  describe "update_changeset/2" do
+    test "it sets :accepts_email_list" do
+      changeset =
+        %User{accepts_email_list: false}
+        |> User.update_changeset(%{accepts_email_list: true})
+
+      assert changeset.valid?
+      assert %User{accepts_email_list: true} = Ecto.Changeset.apply_changes(changeset)
     end
   end
 
@@ -868,113 +904,23 @@ defmodule Pleroma.UserTest do
     end
   end
 
-  describe "get_or_fetch/1 remote users with tld, while BE is runned on subdomain" do
+  describe "get_or_fetch/1 remote users with tld, while BE is ran on subdomain" do
     setup do: clear_config([Pleroma.Web.WebFinger, :update_nickname_on_user_fetch], true)
 
     test "for mastodon" do
-      Tesla.Mock.mock(fn
-        %{url: "https://example.com/.well-known/host-meta"} ->
-          %Tesla.Env{
-            status: 302,
-            headers: [{"location", "https://sub.example.com/.well-known/host-meta"}]
-          }
-
-        %{url: "https://sub.example.com/.well-known/host-meta"} ->
-          %Tesla.Env{
-            status: 200,
-            body:
-              "test/fixtures/webfinger/masto-host-meta.xml"
-              |> File.read!()
-              |> String.replace("{{domain}}", "sub.example.com")
-          }
-
-        %{url: "https://sub.example.com/.well-known/webfinger?resource=acct:a@example.com"} ->
-          %Tesla.Env{
-            status: 200,
-            body:
-              "test/fixtures/webfinger/masto-webfinger.json"
-              |> File.read!()
-              |> String.replace("{{nickname}}", "a")
-              |> String.replace("{{domain}}", "example.com")
-              |> String.replace("{{subdomain}}", "sub.example.com"),
-            headers: [{"content-type", "application/jrd+json"}]
-          }
-
-        %{url: "https://sub.example.com/users/a"} ->
-          %Tesla.Env{
-            status: 200,
-            body:
-              "test/fixtures/webfinger/masto-user.json"
-              |> File.read!()
-              |> String.replace("{{nickname}}", "a")
-              |> String.replace("{{domain}}", "sub.example.com"),
-            headers: [{"content-type", "application/activity+json"}]
-          }
-
-        %{url: "https://sub.example.com/users/a/collections/featured"} ->
-          %Tesla.Env{
-            status: 200,
-            body:
-              File.read!("test/fixtures/users_mock/masto_featured.json")
-              |> String.replace("{{domain}}", "sub.example.com")
-              |> String.replace("{{nickname}}", "a"),
-            headers: [{"content-type", "application/activity+json"}]
-          }
-      end)
-
-      ap_id = "a@example.com"
+      ap_id = "a@mastodon.example"
       {:ok, fetched_user} = User.get_or_fetch(ap_id)
 
-      assert fetched_user.ap_id == "https://sub.example.com/users/a"
-      assert fetched_user.nickname == "a@example.com"
+      assert fetched_user.ap_id == "https://sub.mastodon.example/users/a"
+      assert fetched_user.nickname == "a@mastodon.example"
     end
 
     test "for pleroma" do
-      Tesla.Mock.mock(fn
-        %{url: "https://example.com/.well-known/host-meta"} ->
-          %Tesla.Env{
-            status: 302,
-            headers: [{"location", "https://sub.example.com/.well-known/host-meta"}]
-          }
-
-        %{url: "https://sub.example.com/.well-known/host-meta"} ->
-          %Tesla.Env{
-            status: 200,
-            body:
-              "test/fixtures/webfinger/pleroma-host-meta.xml"
-              |> File.read!()
-              |> String.replace("{{domain}}", "sub.example.com")
-          }
-
-        %{url: "https://sub.example.com/.well-known/webfinger?resource=acct:a@example.com"} ->
-          %Tesla.Env{
-            status: 200,
-            body:
-              "test/fixtures/webfinger/pleroma-webfinger.json"
-              |> File.read!()
-              |> String.replace("{{nickname}}", "a")
-              |> String.replace("{{domain}}", "example.com")
-              |> String.replace("{{subdomain}}", "sub.example.com"),
-            headers: [{"content-type", "application/jrd+json"}]
-          }
-
-        %{url: "https://sub.example.com/users/a"} ->
-          %Tesla.Env{
-            status: 200,
-            body:
-              "test/fixtures/webfinger/pleroma-user.json"
-              |> File.read!()
-              |> String.replace("{{nickname}}", "a")
-              |> String.replace("{{domain}}", "sub.example.com"),
-            headers: [{"content-type", "application/activity+json"}]
-          }
-      end)
-
-      ap_id = "a@example.com"
+      ap_id = "a@pleroma.example"
       {:ok, fetched_user} = User.get_or_fetch(ap_id)
 
-      assert fetched_user.ap_id == "https://sub.example.com/users/a"
-      assert fetched_user.nickname == "a@example.com"
+      assert fetched_user.ap_id == "https://sub.pleroma.example/users/a"
+      assert fetched_user.nickname == "a@pleroma.example"
     end
   end
 
@@ -1598,6 +1544,8 @@ defmodule Pleroma.UserTest do
       {:ok, user2, user} = User.follow(user2, user)
 
       {:ok, activity} = CommonAPI.post(user, %{status: "hey @#{user2.nickname}"})
+
+      Pleroma.Tests.ObanHelpers.perform_all()
 
       activity = Repo.preload(activity, :bookmark)
 
@@ -2350,6 +2298,8 @@ defmodule Pleroma.UserTest do
           })
       end)
 
+      Pleroma.Tests.ObanHelpers.perform_all()
+
       Enum.each(active, fn user ->
         [n1, _n2] = Pleroma.Notification.for_user(user)
         {:ok, _} = Pleroma.Notification.read_one(user, n1.id)
@@ -2678,13 +2628,23 @@ defmodule Pleroma.UserTest do
   end
 
   describe "full_nickname/1" do
-    test "returns fully qualified nickname for local and remote users" do
-      local_user =
-        insert(:user, nickname: "local_user", ap_id: "https://somehost.com/users/local_user")
+    test "returns fully qualified nickname for local users" do
+      local_user = insert(:user, nickname: "local_user")
 
+      assert User.full_nickname(local_user) == "local_user@localhost"
+    end
+
+    test "returns fully qualified nickname for local users when using different domain for webfinger" do
+      clear_config([Pleroma.Web.WebFinger, :domain], "plemora.dev")
+
+      local_user = insert(:user, nickname: "local_user")
+
+      assert User.full_nickname(local_user) == "local_user@plemora.dev"
+    end
+
+    test "returns fully qualified nickname for remote users" do
       remote_user = insert(:user, nickname: "remote@host.com", local: false)
 
-      assert User.full_nickname(local_user) == "local_user@somehost.com"
       assert User.full_nickname(remote_user) == "remote@host.com"
     end
 
@@ -2879,6 +2839,20 @@ defmodule Pleroma.UserTest do
     end
   end
 
+  describe "get_familiar_followers/3" do
+    test "returns familiar followers for a pair of users" do
+      user1 = insert(:user)
+      %{id: id2} = user2 = insert(:user)
+      user3 = insert(:user)
+      _user4 = insert(:user)
+
+      User.follow(user1, user2)
+      User.follow(user2, user3)
+
+      assert [%{id: ^id2}] = User.get_familiar_followers(user3, user1)
+    end
+  end
+
   describe "account endorsements" do
     test "it pins people" do
       user = insert(:user)
@@ -2912,5 +2886,30 @@ defmodule Pleroma.UserTest do
 
       refute User.endorses?(user, pinned_user)
     end
+  end
+
+  test "it checks fields links for a backlink" do
+    user = insert(:user, ap_id: "https://social.example.org/users/lain")
+
+    fields = [
+      %{"name" => "Link", "value" => "http://example.com/rel_me/null"},
+      %{"name" => "Verified link", "value" => "http://example.com/rel_me/link"},
+      %{"name" => "Not a link", "value" => "i'm not a link"}
+    ]
+
+    user
+    |> User.update_and_set_cache(%{raw_fields: fields})
+
+    ObanHelpers.perform_all()
+
+    user = User.get_cached_by_id(user.id)
+
+    assert [
+             %{"verified_at" => nil},
+             %{"verified_at" => verified_at},
+             %{"verified_at" => nil}
+           ] = user.fields
+
+    assert is_binary(verified_at)
   end
 end

@@ -80,7 +80,8 @@ defmodule Pleroma.Web.Plugs.HTTPSecurityPlug do
     "frame-ancestors 'none'",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
-    "manifest-src 'self'"
+    "manifest-src 'self'",
+    "frame-src 'self' https:"
   ]
 
   @csp_start [Enum.join(static_csp_rules, ";") <> ";"]
@@ -90,6 +91,7 @@ defmodule Pleroma.Web.Plugs.HTTPSecurityPlug do
     static_url = Pleroma.Web.Endpoint.static_url()
     websocket_url = Pleroma.Web.Endpoint.websocket_url()
     report_uri = Config.get([:http_security, :report_uri])
+    sentry_dsn = Config.get([:frontend_configurations, :soapbox_fe, "sentryDsn"])
 
     img_src = "img-src 'self' data: blob:"
     media_src = "media-src 'self'"
@@ -117,6 +119,13 @@ defmodule Pleroma.Web.Plugs.HTTPSecurityPlug do
     connect_src =
       if Config.get(:env) == :dev do
         [connect_src, " http://localhost:3035/"]
+      else
+        connect_src
+      end
+
+    connect_src =
+      if sentry_dsn do
+        [connect_src, " ", build_csp_param(sentry_dsn)]
       else
         connect_src
       end
@@ -167,6 +176,8 @@ defmodule Pleroma.Web.Plugs.HTTPSecurityPlug do
     captcha_method = Config.get([Pleroma.Captcha, :method])
     captcha_endpoint = Config.get([captcha_method, :endpoint])
 
+    map_tile_server_endpoint = map_tile_server()
+
     base_endpoints =
       [
         [:media_proxy, :base_url],
@@ -177,8 +188,19 @@ defmodule Pleroma.Web.Plugs.HTTPSecurityPlug do
 
     [captcha_endpoint | base_endpoints]
     |> Enum.map(&build_csp_param/1)
+    |> List.insert_at(-1, map_tile_server_endpoint)
     |> Enum.reduce([], &add_source(&2, &1))
     |> add_source(media_proxy_whitelist)
+  end
+
+  defp map_tile_server do
+    with tile_server when is_binary(tile_server) <-
+           Config.get([:frontend_configurations, :soapbox_fe, "tileServer"]),
+         %{host: host} <- URI.parse(tile_server) do
+      ["*.#{host}"]
+    else
+      _ -> []
+    end
   end
 
   defp add_source(iodata, nil), do: iodata
@@ -201,7 +223,7 @@ defmodule Pleroma.Web.Plugs.HTTPSecurityPlug do
 
   def warn_if_disabled do
     unless Config.get([:http_security, :enabled]) do
-      Logger.warn("
+      Logger.warning("
                                  .i;;;;i.
                                iYcviii;vXY:
                              .YXi       .i1c.

@@ -21,6 +21,8 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
   alias Pleroma.Web.MastodonAPI.StatusView
   alias Pleroma.Web.MediaProxy
   alias Pleroma.Web.PleromaAPI.EmojiReactionController
+  alias Pleroma.Web.RichMedia.Parser.Card
+  alias Pleroma.Web.RichMedia.Parser.Embed
 
   import Pleroma.Web.ActivityPub.Visibility, only: [get_visibility: 1, visible_for_user?: 2]
 
@@ -44,6 +46,27 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
       %{data: %{"type" => "Create"}} = activity ->
         object = Object.normalize(activity, fetch: false)
         object && object.data["inReplyTo"] != "" && object.data["inReplyTo"]
+
+      _ ->
+        nil
+    end)
+    |> Enum.filter(& &1)
+    |> Activity.create_by_object_ap_id_with_object()
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn activity, acc ->
+      object = Object.normalize(activity, fetch: false)
+      if object, do: Map.put(acc, object.data["id"], activity), else: acc
+    end)
+  end
+
+  defp get_quoted_activities([]), do: %{}
+
+  defp get_quoted_activities(activities) do
+    activities
+    |> Enum.map(fn
+      %{data: %{"type" => "Create"}} = activity ->
+        object = Object.normalize(activity, fetch: false)
+        object && object.data["quoteUrl"] != "" && object.data["quoteUrl"]
 
       _ ->
         nil
@@ -97,6 +120,7 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
     # length(activities_with_links) * timeout
     fetch_rich_media_for_activities(activities)
     replied_to_activities = get_replied_to_activities(activities)
+    quoted_activities = get_quoted_activities(activities)
 
     parent_activities =
       activities
@@ -129,6 +153,7 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
     opts =
       opts
       |> Map.put(:replied_to_activities, replied_to_activities)
+      |> Map.put(:quoted_activities, quoted_activities)
       |> Map.put(:parent_activities, parent_activities)
       |> Map.put(:relationships, relationships_opt)
 
@@ -200,7 +225,7 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
       mentions: mentions,
       tags: reblogged[:tags] || [],
       application: build_application(object.data["generator"]),
-      language: nil,
+      language: object.data["language"],
       emojis: [],
       pleroma: %{
         local: activity.local,
@@ -277,8 +302,23 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
       end
 
     reply_to = get_reply_to(activity, opts)
-
     reply_to_user = reply_to && CommonAPI.get_user(reply_to.data["actor"])
+
+    quote_activity = get_quote(activity, opts)
+
+    quote_id =
+      case quote_activity do
+        %Activity{id: id} -> id
+        _ -> nil
+      end
+
+    quote_post =
+      if visible_for_user?(quote_activity, opts[:for]) and opts[:show_quote] != false do
+        quote_rendering_opts = Map.merge(opts, %{activity: quote_activity, show_quote: false})
+        render("show.json", quote_rendering_opts)
+      else
+        nil
+      end
 
     history_len =
       1 +
@@ -311,7 +351,10 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
 
     summary = object.data["summary"] || ""
 
-    card = render("card.json", Pleroma.Web.RichMedia.Helpers.fetch_data_for_activity(activity))
+    card =
+      render("card.json", %{
+        embed: Pleroma.Web.RichMedia.Helpers.fetch_data_for_activity(activity)
+      })
 
     url =
       if user.local do
@@ -391,13 +434,17 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
       mentions: mentions,
       tags: build_tags(tags),
       application: build_application(object.data["generator"]),
-      language: nil,
+      language: object.data["language"],
       emojis: build_emojis(object.data["emoji"]),
       pleroma: %{
         local: activity.local,
         conversation_id: get_context_id(activity),
         context: object.data["context"],
         in_reply_to_account_acct: reply_to_user && reply_to_user.nickname,
+        quote: quote_post,
+        quote_id: quote_id,
+        quote_url: object.data["quoteUrl"],
+        quote_visible: visible_for_user?(quote_activity, opts[:for]),
         content: %{"text/plain" => content_plaintext},
         spoiler_text: %{"text/plain" => summary},
         expires_at: expires_at,
@@ -405,13 +452,24 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
         thread_muted: thread_muted?,
         emoji_reactions: emoji_reactions,
         parent_visible: visible_for_user?(reply_to, opts[:for]),
-        pinned_at: pinned_at
+        pinned_at: pinned_at,
+        content_type: opts[:with_source] && (object.data["content_type"] || "text/plain"),
+        quotes_count: object.data["quotesCount"] || 0,
+        event: build_event(object.data, opts[:for])
       }
     }
   end
 
   def render("show.json", _) do
     nil
+  end
+
+  def render("card.json", %{embed: %Embed{} = embed}) do
+    with {:ok, %Card{} = card} <- Card.parse(embed) do
+      Card.to_map(card)
+    else
+      _ -> nil
+    end
   end
 
   def render("history.json", %{activity: %{data: %{"object" => _object}} = activity} = opts) do
@@ -504,7 +562,8 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
       id: activity.id,
       text: get_source_text(Map.get(object.data, "source", "")),
       spoiler_text: Map.get(object.data, "summary", ""),
-      content_type: get_source_content_type(object.data["source"])
+      content_type: get_source_content_type(object.data["source"]),
+      location: build_source_location(object.data)
     }
   end
 
@@ -543,12 +602,14 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
     }
   end
 
+  def render("card.json", %{embed: %Card{} = card}), do: Card.to_map(card)
   def render("card.json", _), do: nil
 
   def render("attachment.json", %{attachment: attachment}) do
     [attachment_url | _] = attachment["url"]
     media_type = attachment_url["mediaType"] || attachment_url["mimeType"] || "image"
-    href = attachment_url["href"] |> MediaProxy.url()
+    href_remote = attachment_url["href"]
+    href = href_remote |> MediaProxy.url()
     href_preview = attachment_url["href"] |> MediaProxy.preview_url()
     meta = render("attachment_meta.json", %{attachment: attachment})
 
@@ -574,7 +635,7 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
     %{
       id: attachment_id,
       url: href,
-      remote_url: href,
+      remote_url: href_remote,
       preview_url: href_preview,
       text_url: href,
       type: type,
@@ -614,6 +675,14 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
     }
   end
 
+  def render("translation.json", %{
+        content: content,
+        detected_source_language: detected_source_language,
+        provider: provider
+      }) do
+    %{content: content, detected_source_language: detected_source_language, provider: provider}
+  end
+
   def get_reply_to(activity, %{replied_to_activities: replied_to_activities}) do
     object = Object.normalize(activity, fetch: false)
 
@@ -633,7 +702,27 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
     end
   end
 
-  def render_content(%{data: %{"name" => name}} = object) when not is_nil(name) and name != "" do
+  def get_quote(activity, %{quoted_activities: quoted_activities}) do
+    object = Object.normalize(activity, fetch: false)
+
+    with nil <- quoted_activities[object.data["quoteUrl"]] do
+      # For when a quote post is inside an Announce
+      Activity.get_create_by_object_ap_id_with_object(object.data["quoteUrl"])
+    end
+  end
+
+  def get_quote(%{data: %{"object" => _object}} = activity, _) do
+    object = Object.normalize(activity, fetch: false)
+
+    if object.data["quoteUrl"] && object.data["quoteUrl"] != "" do
+      Activity.get_create_by_object_ap_id(object.data["quoteUrl"])
+    else
+      nil
+    end
+  end
+
+  def render_content(%{data: %{"name" => name, "type" => type}} = object)
+      when not is_nil(name) and name != "" and type != "Event" do
     url = object.data["url"] || object.data["id"]
 
     "<p><a href=\"#{url}\">#{name}</a></p>#{object.data["content"]}"
@@ -689,6 +778,61 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
       %{shortcode: name, url: url, static_url: url, visible_in_picker: false}
     end)
   end
+
+  defp build_event(%{"type" => "Event"} = data, for_user) do
+    %{
+      name: data["name"],
+      start_time: data["startTime"],
+      end_time: data["endTime"],
+      join_mode: data["joinMode"],
+      participants_count: data["participation_count"],
+      location: build_event_location(data["location"]),
+      join_state: build_event_join_state(for_user, data["id"]),
+      participation_request_count: maybe_put_participation_request_count(data, for_user)
+    }
+  end
+
+  defp build_event(_, _), do: nil
+
+  defp build_event_location(%{"type" => "Place"} = location) do
+    %{
+      name: location["name"],
+      url: location["url"],
+      longitude: location["longitude"],
+      latitude: location["latitude"]
+    }
+    |> maybe_put_address(location["address"])
+  end
+
+  defp build_event_location(_), do: nil
+
+  defp maybe_put_address(location, %{"type" => "PostalAddress"} = address) do
+    Map.merge(location, %{
+      street: address["streetAddress"],
+      postal_code: address["postalCode"],
+      locality: address["addressLocality"],
+      region: address["addressRegion"],
+      country: address["addressCountry"]
+    })
+  end
+
+  defp maybe_put_address(location, _), do: location
+
+  defp build_event_join_state(%{ap_id: actor}, id) do
+    latest_join = Pleroma.Web.ActivityPub.Utils.get_existing_join(actor, id)
+
+    if latest_join do
+      latest_join.data["state"]
+    end
+  end
+
+  defp build_event_join_state(_, _), do: nil
+
+  defp maybe_put_participation_request_count(%{"actor" => actor} = data, %{ap_id: actor}) do
+    data["participation_request_count"]
+  end
+
+  defp maybe_put_participation_request_count(_, _), do: nil
 
   defp present?(nil), do: false
   defp present?(false), do: false
@@ -756,4 +900,16 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
   defp get_source_content_type(_source) do
     Utils.get_content_type(nil)
   end
+
+  def build_source_location(%{"location_id" => location_id}) when is_binary(location_id) do
+    location = Geospatial.Service.service().get_by_id(location_id) |> List.first()
+
+    if location do
+      Pleroma.Web.PleromaAPI.SearchView.render("show_location.json", %{location: location})
+    else
+      nil
+    end
+  end
+
+  def build_source_location(_), do: nil
 end

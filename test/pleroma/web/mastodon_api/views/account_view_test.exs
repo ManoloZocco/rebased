@@ -84,7 +84,6 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
         tags: [],
         is_admin: false,
         is_moderator: false,
-        privileges: [],
         is_suggested: false,
         hide_favorites: true,
         hide_followers: false,
@@ -93,7 +92,8 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
         hide_follows_count: false,
         relationship: %{},
         skip_thread_containment: false,
-        accepts_chat_messages: nil
+        accepts_chat_messages: nil,
+        location: nil
       }
     }
 
@@ -116,7 +116,7 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
       }
     end
 
-    test "shows roles and privileges when show_role: true", %{
+    test "shows roles when show_role: true", %{
       user: user,
       moderator: moderator,
       admin: admin,
@@ -127,29 +127,11 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
       assert %{pleroma: %{is_moderator: false, is_admin: false}} =
                AccountView.render("show.json", %{user: user, skip_visibility_check: true})
 
-      assert [] ==
-               AccountView.render("show.json", %{user: user, skip_visibility_check: true})[
-                 :pleroma
-               ][:privileges]
-               |> Enum.sort()
-
       assert %{pleroma: %{is_moderator: true, is_admin: false}} =
                AccountView.render("show.json", %{user: moderator, skip_visibility_check: true})
 
-      assert [:cofe, :only_moderator] ==
-               AccountView.render("show.json", %{user: moderator, skip_visibility_check: true})[
-                 :pleroma
-               ][:privileges]
-               |> Enum.sort()
-
       assert %{pleroma: %{is_moderator: false, is_admin: true}} =
                AccountView.render("show.json", %{user: admin, skip_visibility_check: true})
-
-      assert [:cofe, :only_admin] ==
-               AccountView.render("show.json", %{user: admin, skip_visibility_check: true})[
-                 :pleroma
-               ][:privileges]
-               |> Enum.sort()
 
       assert %{pleroma: %{is_moderator: true, is_admin: true}} =
                AccountView.render("show.json", %{
@@ -157,13 +139,6 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
                  skip_visibility_check: true
                })
 
-      assert [:cofe, :only_admin, :only_moderator] ==
-               AccountView.render("show.json", %{
-                 user: moderator_admin,
-                 skip_visibility_check: true
-               })[:pleroma][:privileges]
-               |> Enum.sort()
-
       refute match?(
                %{pleroma: %{is_moderator: _}},
                AccountView.render("show.json", %{
@@ -174,14 +149,6 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
 
       refute match?(
                %{pleroma: %{is_admin: _}},
-               AccountView.render("show.json", %{
-                 user: user_no_show_roles,
-                 skip_visibility_check: true
-               })
-             )
-
-      refute match?(
-               %{pleroma: %{privileges: _}},
                AccountView.render("show.json", %{
                  user: user_no_show_roles,
                  skip_visibility_check: true
@@ -206,10 +173,7 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
 
       refute match?(
                %{pleroma: %{privileges: _}},
-               AccountView.render("show.json", %{
-                 user: moderator_admin_no_show_roles,
-                 skip_visibility_check: true
-               })
+               AccountView.render("show.json", %{user: user, skip_visibility_check: true})
              )
     end
 
@@ -328,7 +292,6 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
         tags: [],
         is_admin: false,
         is_moderator: false,
-        privileges: [],
         is_suggested: false,
         hide_favorites: true,
         hide_followers: false,
@@ -337,7 +300,8 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
         hide_follows_count: false,
         relationship: %{},
         skip_thread_containment: false,
-        accepts_chat_messages: nil
+        accepts_chat_messages: nil,
+        location: nil
       }
     }
 
@@ -637,6 +601,23 @@ defmodule Pleroma.Web.MastodonAPI.AccountViewTest do
                %{user: user, for: user}
              )[:pleroma][:email] == user.email
     end
+  end
+
+  test "shows accepts_email_list only to the account owner" do
+    user = insert(:user)
+    other_user = insert(:user)
+
+    user = User.get_cached_by_ap_id(user.ap_id)
+
+    assert AccountView.render(
+             "show.json",
+             %{user: user, for: other_user}
+           )[:pleroma][:accepts_email_list] == nil
+
+    assert AccountView.render(
+             "show.json",
+             %{user: user, for: user}
+           )[:pleroma][:accepts_email_list] == user.accepts_email_list
   end
 
   describe "hiding birthday" do

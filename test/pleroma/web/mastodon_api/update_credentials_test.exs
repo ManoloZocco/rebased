@@ -147,6 +147,13 @@ defmodule Pleroma.Web.MastodonAPI.UpdateCredentialsTest do
       assert user_data["pleroma"]["accepts_chat_messages"] == false
     end
 
+    test "updates the user's newsletter preference", %{user: user, conn: conn} do
+      conn = patch(conn, "/api/v1/accounts/update_credentials", %{accepts_email_list: "true"})
+
+      assert json_response_and_validate_schema(conn, 200)
+      assert %User{accepts_email_list: true} = User.get_by_id(user.id)
+    end
+
     test "updates the user's allow_following_move", %{user: user, conn: conn} do
       assert user.allow_following_move == true
 
@@ -492,8 +499,12 @@ defmodule Pleroma.Web.MastodonAPI.UpdateCredentialsTest do
 
     test "update fields", %{conn: conn} do
       fields = [
-        %{"name" => "<a href=\"http://google.com\">foo</a>", "value" => "<script>bar</script>"},
-        %{"name" => "link.io", "value" => "cofe.io"}
+        %{
+          "name" => "<a href=\"http://google.com\">foo</a>",
+          "value" => "<script>bar</script>",
+          "verified_at" => nil
+        },
+        %{"name" => "link.io", "value" => "cofe.io", "verified_at" => nil}
       ]
 
       account_data =
@@ -502,10 +513,15 @@ defmodule Pleroma.Web.MastodonAPI.UpdateCredentialsTest do
         |> json_response_and_validate_schema(200)
 
       assert account_data["fields"] == [
-               %{"name" => "<a href=\"http://google.com\">foo</a>", "value" => "bar"},
+               %{
+                 "name" => "<a href=\"http://google.com\">foo</a>",
+                 "value" => "bar",
+                 "verified_at" => nil
+               },
                %{
                  "name" => "link.io",
-                 "value" => ~S(<a href="http://cofe.io" rel="ugc">cofe.io</a>)
+                 "value" => ~S(<a href="http://cofe.io" rel="ugc">cofe.io</a>),
+                 "verified_at" => nil
                }
              ]
 
@@ -552,6 +568,16 @@ defmodule Pleroma.Web.MastodonAPI.UpdateCredentialsTest do
       assert user_data["pleroma"]["birthday"] == nil
     end
 
+    test "updates location", %{conn: conn} do
+      res =
+        patch(conn, "/api/v1/accounts/update_credentials", %{
+          "location" => "Pleroma, Fediverse"
+        })
+
+      assert user_data = json_response_and_validate_schema(res, 200)
+      assert user_data["pleroma"]["location"] == "Pleroma, Fediverse"
+    end
+
     test "emojis in fields labels", %{conn: conn} do
       fields = [
         %{"name" => ":firefox:", "value" => "is best 2hu"},
@@ -564,8 +590,8 @@ defmodule Pleroma.Web.MastodonAPI.UpdateCredentialsTest do
         |> json_response_and_validate_schema(200)
 
       assert account_data["fields"] == [
-               %{"name" => ":firefox:", "value" => "is best 2hu"},
-               %{"name" => "they wins", "value" => ":blank:"}
+               %{"name" => ":firefox:", "value" => "is best 2hu", "verified_at" => nil},
+               %{"name" => "they wins", "value" => ":blank:", "verified_at" => nil}
              ]
 
       assert account_data["source"]["fields"] == [
@@ -593,10 +619,11 @@ defmodule Pleroma.Web.MastodonAPI.UpdateCredentialsTest do
         |> json_response_and_validate_schema(200)
 
       assert account["fields"] == [
-               %{"name" => "foo", "value" => "bar"},
+               %{"name" => "foo", "value" => "bar", "verified_at" => nil},
                %{
                  "name" => "link",
-                 "value" => ~S(<a href="http://cofe.io" rel="ugc">http://cofe.io</a>)
+                 "value" => ~S(<a href="http://cofe.io" rel="ugc">http://cofe.io</a>),
+                 "verified_at" => nil
                }
              ]
 
@@ -618,7 +645,7 @@ defmodule Pleroma.Web.MastodonAPI.UpdateCredentialsTest do
         |> json_response_and_validate_schema(200)
 
       assert account["fields"] == [
-               %{"name" => "foo", "value" => ""}
+               %{"name" => "foo", "value" => "", "verified_at" => nil}
              ]
     end
 

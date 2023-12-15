@@ -193,6 +193,25 @@ defmodule Pleroma.Web.MastodonAPI.AccountView do
     render_many(targets, AccountView, "relationship.json", render_opts)
   end
 
+  def render("familiar_followers.json", %{users: users} = opts) do
+    opts =
+      opts
+      |> Map.merge(%{as: :user})
+      |> Map.delete(:users)
+
+    users
+    |> render_many(AccountView, "familiar_followers.json", opts)
+  end
+
+  def render("familiar_followers.json", %{user: %{id: id, accounts: accounts}} = opts) do
+    accounts =
+      accounts
+      |> render_many(AccountView, "show.json", opts)
+      |> Enum.filter(&Enum.any?/1)
+
+    %{id: id, accounts: accounts}
+  end
+
   defp do_render("show.json", %{user: user} = opts) do
     user = User.sanitize_html(user, User.html_filter_policy(opts[:for]))
     display_name = user.name || user.nickname
@@ -277,7 +296,7 @@ defmodule Pleroma.Web.MastodonAPI.AccountView do
           actor_type: user.actor_type
         }
       },
-      last_status_at: user.last_status_at,
+      last_status_at: Utils.to_masto_date(user.last_status_at, nil),
 
       # Pleroma extensions
       # Note: it's insecure to output :email but fully-qualified nickname may serve as safe stub
@@ -297,19 +316,21 @@ defmodule Pleroma.Web.MastodonAPI.AccountView do
         skip_thread_containment: user.skip_thread_containment,
         background_image: image_url(user.background) |> MediaProxy.url(),
         accepts_chat_messages: user.accepts_chat_messages,
-        favicon: favicon
+        favicon: favicon,
+        location: user.location
       }
     }
     |> maybe_put_role(user, opts[:for])
+    |> maybe_put_privileges(user, opts[:for])
     |> maybe_put_settings(user, opts[:for], opts)
     |> maybe_put_notification_settings(user, opts[:for])
     |> maybe_put_settings_store(user, opts[:for], opts)
-    |> maybe_put_chat_token(user, opts[:for], opts)
     |> maybe_put_activation_status(user, opts[:for])
     |> maybe_put_follow_requests_count(user, opts[:for])
     |> maybe_put_allow_following_move(user, opts[:for])
     |> maybe_put_unread_conversation_count(user, opts[:for])
     |> maybe_put_unread_notification_count(user, opts[:for])
+    |> maybe_put_accepts_email_list(user, opts[:for])
     |> maybe_put_email_address(user, opts[:for])
     |> maybe_put_mute_expires_at(user, opts[:for], opts)
     |> maybe_show_birthday(user, opts[:for])
@@ -360,15 +381,6 @@ defmodule Pleroma.Web.MastodonAPI.AccountView do
 
   defp maybe_put_settings_store(data, _, _, _), do: data
 
-  defp maybe_put_chat_token(data, %User{id: id}, %User{id: id}, %{
-         with_chat_token: token
-       }) do
-    data
-    |> Kernel.put_in([:pleroma, :chat_token], token)
-  end
-
-  defp maybe_put_chat_token(data, _, _, _), do: data
-
   defp maybe_put_role(data, %User{show_role: true} = user, _) do
     put_role(data, user)
   end
@@ -383,7 +395,16 @@ defmodule Pleroma.Web.MastodonAPI.AccountView do
     data
     |> Kernel.put_in([:pleroma, :is_admin], user.is_admin)
     |> Kernel.put_in([:pleroma, :is_moderator], user.is_moderator)
-    |> Kernel.put_in([:pleroma, :privileges], User.privileges(user))
+  end
+
+  defp maybe_put_privileges(data, %User{id: user_id} = user, %User{id: user_id}) do
+    put_privileges(data, user)
+  end
+
+  defp maybe_put_privileges(data, _, _), do: data
+
+  defp put_privileges(data, user) do
+    Kernel.put_in(data, [:pleroma, :privileges], User.privileges(user))
   end
 
   defp maybe_put_notification_settings(data, %User{id: user_id} = user, %User{id: user_id}) do
@@ -427,6 +448,16 @@ defmodule Pleroma.Web.MastodonAPI.AccountView do
   end
 
   defp maybe_put_unread_notification_count(data, _, _), do: data
+
+  defp maybe_put_accepts_email_list(data, %User{id: user_id}, %User{id: user_id} = user) do
+    Kernel.put_in(
+      data,
+      [:pleroma, :accepts_email_list],
+      user.accepts_email_list
+    )
+  end
+
+  defp maybe_put_accepts_email_list(data, _, _), do: data
 
   defp maybe_put_email_address(data, %User{id: user_id}, %User{id: user_id} = user) do
     Kernel.put_in(

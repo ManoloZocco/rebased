@@ -16,6 +16,7 @@ defmodule Pleroma.Web.MastodonAPI.StatusViewTest do
   alias Pleroma.Web.CommonAPI
   alias Pleroma.Web.MastodonAPI.AccountView
   alias Pleroma.Web.MastodonAPI.StatusView
+  alias Pleroma.Web.RichMedia.Parser.Embed
 
   require Bitwise
 
@@ -326,6 +327,10 @@ defmodule Pleroma.Web.MastodonAPI.StatusViewTest do
         conversation_id: convo_id,
         context: object_data["context"],
         in_reply_to_account_acct: nil,
+        quote: nil,
+        quote_id: nil,
+        quote_url: nil,
+        quote_visible: false,
         content: %{"text/plain" => HTML.strip_tags(object_data["content"])},
         spoiler_text: %{"text/plain" => HTML.strip_tags(object_data["summary"])},
         expires_at: nil,
@@ -333,7 +338,10 @@ defmodule Pleroma.Web.MastodonAPI.StatusViewTest do
         thread_muted: false,
         emoji_reactions: [],
         parent_visible: false,
-        pinned_at: nil
+        pinned_at: nil,
+        content_type: nil,
+        quotes_count: 0,
+        event: nil
       }
     }
 
@@ -420,6 +428,88 @@ defmodule Pleroma.Web.MastodonAPI.StatusViewTest do
     [status] = StatusView.render("index.json", %{activities: [activity], as: :activity})
 
     assert status.in_reply_to_id == to_string(note.id)
+  end
+
+  test "a quote post" do
+    post = insert(:note_activity)
+    user = insert(:user)
+
+    {:ok, quote_post} = CommonAPI.post(user, %{status: "he", quote_id: post.id})
+    {:ok, quoted_quote_post} = CommonAPI.post(user, %{status: "yo", quote_id: quote_post.id})
+
+    status = StatusView.render("show.json", %{activity: quoted_quote_post})
+
+    assert status.pleroma.quote.id == to_string(quote_post.id)
+    assert status.pleroma.quote_id == to_string(quote_post.id)
+    assert status.pleroma.quote_url == Object.normalize(quote_post).data["id"]
+    assert status.pleroma.quote_visible
+
+    # Quotes don't go more than one level deep\
+    refute status.pleroma.quote.pleroma.quote
+    assert status.pleroma.quote.pleroma.quote_id == to_string(post.id)
+    assert status.pleroma.quote.pleroma.quote_url == Object.normalize(post).data["id"]
+    assert status.pleroma.quote.pleroma.quote_visible
+
+    # In an index
+    [status] = StatusView.render("index.json", %{activities: [quoted_quote_post], as: :activity})
+
+    assert status.pleroma.quote.id == to_string(quote_post.id)
+  end
+
+  test "quoted private post" do
+    user = insert(:user)
+
+    # Insert a private post
+    private = insert(:followers_only_note_activity, user: user)
+    private_object = Object.normalize(private)
+
+    # Create a public post quoting the private post
+    quote_private =
+      insert(:note_activity, note: insert(:note, data: %{"quoteUrl" => private_object.data["id"]}))
+
+    status = StatusView.render("show.json", %{activity: quote_private})
+
+    # The quote isn't rendered
+    refute status.pleroma.quote
+    assert status.pleroma.quote_url == private_object.data["id"]
+    refute status.pleroma.quote_visible
+
+    # After following the user, the quote is rendered
+    follower = insert(:user)
+    CommonAPI.follow(follower, user)
+
+    status = StatusView.render("show.json", %{activity: quote_private, for: follower})
+    assert status.pleroma.quote.id == to_string(private.id)
+    assert status.pleroma.quote_visible
+  end
+
+  test "quoted direct message" do
+    # Insert a direct message
+    direct = insert(:direct_note_activity)
+    direct_object = Object.normalize(direct)
+
+    # Create a public post quoting the direct message
+    quote_direct =
+      insert(:note_activity, note: insert(:note, data: %{"quoteUrl" => direct_object.data["id"]}))
+
+    status = StatusView.render("show.json", %{activity: quote_direct})
+
+    # The quote isn't rendered
+    refute status.pleroma.quote
+    assert status.pleroma.quote_url == direct_object.data["id"]
+    refute status.pleroma.quote_visible
+  end
+
+  test "repost of quote post" do
+    post = insert(:note_activity)
+    user = insert(:user)
+
+    {:ok, quote_post} = CommonAPI.post(user, %{status: "he", quote_id: post.id})
+    {:ok, repost} = CommonAPI.repeat(quote_post.id, user)
+
+    [status] = StatusView.render("index.json", %{activities: [repost], as: :activity})
+
+    assert status.reblog.pleroma.quote.id == to_string(post.id)
   end
 
   test "contains mentions" do
@@ -614,8 +704,26 @@ defmodule Pleroma.Web.MastodonAPI.StatusViewTest do
     assert represented[:url] ==
              "https://mobilizon.org/events/252d5816-00a3-4a89-a66f-15bf65c33e39"
 
-    assert represented[:content] ==
-             "<p><a href=\"https://mobilizon.org/events/252d5816-00a3-4a89-a66f-15bf65c33e39\">Mobilizon Launching Party</a></p><p>Mobilizon is now federated! 🎉</p><p></p><p>You can view this event from other instances if they are subscribed to mobilizon.org, and soon directly from Mastodon and Pleroma. It is possible that you may see some comments from other instances, including Mastodon ones, just below.</p><p></p><p>With a Mobilizon account on an instance, you may <strong>participate</strong> at events from other instances and <strong>add comments</strong> on events.</p><p></p><p>Of course, it&#39;s still <u>a work in progress</u>: if reports made from an instance on events and comments can be federated, you can&#39;t block people right now, and moderators actions are rather limited, but this <strong>will definitely get fixed over time</strong> until first stable version next year.</p><p></p><p>Anyway, if you want to come up with some feedback, head over to our forum or - if you feel you have technical skills and are familiar with it - on our Gitlab repository.</p><p></p><p>Also, to people that want to set Mobilizon themselves even though we really don&#39;t advise to do that for now, we have a little documentation but it&#39;s quite the early days and you&#39;ll probably need some help. No worries, you can chat with us on our Forum or though our Matrix channel.</p><p></p><p>Check our website for more informations and follow us on Twitter or Mastodon.</p>"
+    assert represented.pleroma.event == %{
+             name: "Mobilizon Launching Party",
+             start_time: "2019-12-18T13:00:00Z",
+             end_time: "2019-12-18T14:00:00Z",
+             join_mode: "free",
+             participants_count: 0,
+             location: %{
+               country: "France",
+               latitude: nil,
+               locality: "Nantes",
+               longitude: nil,
+               name: "Cour du Château des Ducs de Bretagne",
+               postal_code: nil,
+               region: "Pays de la Loire",
+               street: nil,
+               url: nil
+             },
+             join_state: nil,
+             participation_request_count: nil
+           }
   end
 
   describe "build_tags/1" do
@@ -641,56 +749,45 @@ defmodule Pleroma.Web.MastodonAPI.StatusViewTest do
 
   describe "rich media cards" do
     test "a rich media card without a site name renders correctly" do
-      page_url = "http://example.com"
-
-      card = %{
-        url: page_url,
-        image: page_url <> "/example.jpg",
-        title: "Example website"
+      embed = %Embed{
+        url: "http://example.com",
+        title: "Example website",
+        meta: %{"twitter:image" => "http://example.com/example.jpg"}
       }
 
-      %{provider_name: "example.com"} =
-        StatusView.render("card.json", %{page_url: page_url, rich_media: card})
+      %{"provider_name" => "example.com"} = StatusView.render("card.json", %{embed: embed})
     end
 
     test "a rich media card without a site name or image renders correctly" do
-      page_url = "http://example.com"
-
-      card = %{
-        url: page_url,
+      embed = %Embed{
+        url: "http://example.com",
         title: "Example website"
       }
 
-      %{provider_name: "example.com"} =
-        StatusView.render("card.json", %{page_url: page_url, rich_media: card})
+      %{"provider_name" => "example.com"} = StatusView.render("card.json", %{embed: embed})
     end
 
     test "a rich media card without an image renders correctly" do
-      page_url = "http://example.com"
-
-      card = %{
-        url: page_url,
-        site_name: "Example site name",
-        title: "Example website"
+      embed = %Embed{
+        url: "http://example.com",
+        title: "Example website",
+        meta: %{"twitter:title" => "Example site name"}
       }
 
-      %{provider_name: "example.com"} =
-        StatusView.render("card.json", %{page_url: page_url, rich_media: card})
+      %{"provider_name" => "example.com"} = StatusView.render("card.json", %{embed: embed})
     end
 
     test "a rich media card with all relevant data renders correctly" do
-      page_url = "http://example.com"
-
-      card = %{
-        url: page_url,
-        site_name: "Example site name",
+      embed = %Embed{
+        url: "http://example.com",
         title: "Example website",
-        image: page_url <> "/example.jpg",
-        description: "Example description"
+        meta: %{
+          "twitter:title" => "Example site name",
+          "twitter:image" => "http://example.com/example.jpg"
+        }
       }
 
-      %{provider_name: "example.com"} =
-        StatusView.render("card.json", %{page_url: page_url, rich_media: card})
+      %{"provider_name" => "example.com"} = StatusView.render("card.json", %{embed: embed})
     end
   end
 
@@ -768,6 +865,16 @@ defmodule Pleroma.Web.MastodonAPI.StatusViewTest do
 
     status = StatusView.render("show.json", activity: edited)
     assert status.edited_at
+  end
+
+  test "it shows post language" do
+    user = insert(:user)
+
+    {:ok, post} = CommonAPI.post(user, %{status: "Szczęść Boże", language: "pl"})
+
+    status = StatusView.render("show.json", activity: post)
+
+    assert status.language == "pl"
   end
 
   test "with a source object" do

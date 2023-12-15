@@ -8,11 +8,6 @@ For from source installations Pleroma configuration works by first importing the
 
 To add configuration to your config file, you can copy it from the base config. The latest version of it can be viewed [here](https://git.pleroma.social/pleroma/pleroma/blob/develop/config/config.exs). You can also use this file if you don't know how an option is supposed to be formatted.
 
-## :shout
-
-* `enabled` - Enables the backend Shoutbox chat feature. Defaults to `true`.
-* `limit` - Shout character limit. Defaults to `5_000`
-
 ## :instance
 * `name`: The instance’s name.
 * `email`: Email used to reach an Administrator/Moderator of the instance.
@@ -55,6 +50,7 @@ To add configuration to your config file, you can copy it from the base config. 
 * `remote_post_retention_days`: The default amount of days to retain remote posts when pruning the database.
 * `user_bio_length`: A user bio maximum length (default: `5000`).
 * `user_name_length`: A user name maximum length (default: `100`).
+* `user_location_length`: A user location maximum length (default: `50`).
 * `skip_thread_containment`: Skip filter out broken threads. The default is `false`.
 * `limit_to_local_content`: Limit unauthenticated users to search for local statutes and users only. Possible values: `:unauthenticated`, `:all` and `false`. The default is `:unauthenticated`.
 * `max_account_fields`: The maximum number of custom fields in the user profile (default: `10`).
@@ -160,6 +156,8 @@ To add configuration to your config file, you can copy it from the base config. 
     * `Pleroma.Web.ActivityPub.MRF.AntiFollowbotPolicy`: Drops follow requests from followbots. Users can still allow bots to follow them by first following the bot.
     * `Pleroma.Web.ActivityPub.MRF.KeywordPolicy`: Rejects or removes from the federated timeline or replaces keywords. (See [`:mrf_keyword`](#mrf_keyword)).
     * `Pleroma.Web.ActivityPub.MRF.ForceMentionsInContent`: Forces every mentioned user to be reflected in the post content.
+    * `Pleroma.Web.ActivityPub.MRF.InlineQuotePolicy`: Forces quote post URLs to be reflected in the message content inline.
+    * `Pleroma.Web.ActivityPub.MRF.QuoteToLinkTagPolicy`: Force a Link tag for posts quoting another post. (may break outgoing federation of quote posts with older Pleroma versions)
 * `transparency`: Make the content of your Message Rewrite Facility settings public (via nodeinfo).
 * `transparency_exclusions`: Exclude specific instance names from MRF transparency.  The use of the exclusions feature will be disclosed in nodeinfo as a boolean value.
 
@@ -261,11 +259,17 @@ Notes:
 
 * `follower_nickname`: The name of the bot account to use for following newly discovered users. Using `followbot` or similar is strongly suggested.
 
+#### :mrf_inline_quote
+* `prefix`: Prefix before the link (default: `RT`)
+* 
 #### :mrf_emoji
 * `remove_url`: A list of patterns which result in emoji whose URL matches being removed from the message. This will apply to statuses, emoji reactions, and user profiles. Each pattern can be a string or a [regular expression](https://hexdocs.pm/elixir/Regex.html).
 * `remove_shortcode`: A list of patterns which result in emoji whose shortcode matches being removed from the message. This will apply to statuses, emoji reactions, and user profiles. Each pattern can be a string or a [regular expression](https://hexdocs.pm/elixir/Regex.html).
 * `federated_timeline_removal_url`: A list of patterns which result in message with emojis whose URLs match being removed from federated timelines (a.k.a unlisted). This will apply only to statuses. Each pattern can be a string or a [regular expression](https://hexdocs.pm/elixir/Regex.html).
 * `federated_timeline_removal_shortcode`: A list of patterns which result in message with emojis whose shortcodes match being removed from federated timelines (a.k.a unlisted). This will apply only to statuses. Each pattern can be a string or a [regular expression](https://hexdocs.pm/elixir/Regex.html).
+
+#### :mrf_inline_quote
+* `template`: The template to append to the post. `{url}` will be replaced with the actual link to the quoted post. Default: `<bdi>RT:</bdi> {url}`
 
 ### :activitypub
 * `unfollow_blocked`: Whether blocks result in people getting unfollowed
@@ -424,6 +428,7 @@ config :pleroma, Pleroma.Web.MediaProxy.Invalidation.Http,
 * `ignore_hosts`: list of hosts which will be ignored by the metadata parser. For example `["accounts.google.com", "xss.website"]`, defaults to `[]`.
 * `ignore_tld`: list TLDs (top-level domains) which will ignore for parse metadata. default is ["local", "localdomain", "lan"].
 * `parsers`: list of Rich Media parsers.
+* `oembed_providers_enabled`: Embed rich media from a list of known providers. This takes precedence over other parsers.
 * `failure_backoff`: Amount of milliseconds after request failure, during which the request will not be retried.
 
 ## HTTP server
@@ -512,6 +517,7 @@ Supported rate limiters:
 * `:relation_id_action` - Following/Unfollowing for a specific user.
 * `:statuses_actions` - Status actions such as: (un)repeating, (un)favouriting, creating, deleting.
 * `:status_id_action` - (un)Repeating/(un)Favouriting a particular status.
+* `:events_actions` - Events actions such as: creating, joining, leaving.
 * `:authentication` - Authentication actions, i.e getting an OAuth token.
 * `:password_reset` - Requesting password reset emails.
 * `:account_confirmation_resend` - Requesting resending account confirmation emails.

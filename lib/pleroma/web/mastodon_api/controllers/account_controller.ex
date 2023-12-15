@@ -32,14 +32,14 @@ defmodule Pleroma.Web.MastodonAPI.AccountController do
 
   plug(Pleroma.Web.ApiSpec.CastAndValidate)
 
-  plug(:skip_auth when action in [:create, :lookup])
+  plug(:skip_auth when action in [:create])
 
   plug(:skip_public_check when action in [:show, :statuses])
 
   plug(
     OAuthScopesPlug,
     %{fallback: :proceed_unauthenticated, scopes: ["read:accounts"]}
-    when action in [:show, :followers, :following]
+    when action in [:show, :followers, :following, :lookup]
   )
 
   plug(
@@ -72,7 +72,10 @@ defmodule Pleroma.Web.MastodonAPI.AccountController do
     %{scopes: ["follow", "write:blocks"]} when action in [:block, :unblock]
   )
 
-  plug(OAuthScopesPlug, %{scopes: ["read:follows"]} when action == :relationships)
+  plug(
+    OAuthScopesPlug,
+    %{scopes: ["read:follows"]} when action in [:relationships, :familiar_followers]
+  )
 
   plug(
     OAuthScopesPlug,
@@ -157,13 +160,10 @@ defmodule Pleroma.Web.MastodonAPI.AccountController do
 
   @doc "GET /api/v1/accounts/verify_credentials"
   def verify_credentials(%{assigns: %{user: user}} = conn, _) do
-    chat_token = Phoenix.Token.sign(conn, "user socket", user.id)
-
     render(conn, "show.json",
       user: user,
       for: user,
-      with_pleroma_settings: true,
-      with_chat_token: chat_token
+      with_pleroma_settings: true
     )
   end
 
@@ -194,6 +194,7 @@ defmodule Pleroma.Web.MastodonAPI.AccountController do
         :allow_following_move,
         :also_known_as,
         :accepts_chat_messages,
+        :accepts_email_list,
         :show_birthday
       ]
       |> Enum.reduce(%{}, fn key, acc ->
@@ -223,6 +224,7 @@ defmodule Pleroma.Web.MastodonAPI.AccountController do
       # Note: param name is indeed :discoverable (not an error)
       |> Maps.put_if_present(:is_discoverable, params[:discoverable])
       |> Maps.put_if_present(:birthday, params[:birthday])
+      |> Maps.put_if_present(:location, params[:location])
       |> Maps.put_if_present(:language, Pleroma.Web.Gettext.normalize_locale(params[:language]))
 
     # What happens here:
@@ -281,11 +283,16 @@ defmodule Pleroma.Web.MastodonAPI.AccountController do
   end
 
   defp normalize_fields_attributes(fields) do
-    if(Enum.all?(fields, &is_tuple/1), do: Enum.map(fields, fn {_, v} -> v end), else: fields)
-    |> Enum.map(fn
-      %{} = field -> %{"name" => field.name, "value" => field.value}
-      field -> field
-    end)
+    if Enum.all?(fields, &is_tuple/1) do
+      Enum.map(fields, fn {_, %{} = field} ->
+        %{"name" => field.name, "value" => field.value}
+      end)
+    else
+      Enum.map(fields, fn
+        %{} = field -> %{"name" => field.name, "value" => field.value}
+        field -> field
+      end)
+    end
   end
 
   @doc "GET /api/v1/accounts/relationships"
@@ -561,8 +568,9 @@ defmodule Pleroma.Web.MastodonAPI.AccountController do
   end
 
   @doc "GET /api/v1/accounts/lookup"
-  def lookup(conn, %{acct: nickname} = _params) do
-    with %User{} = user <- User.get_by_nickname(nickname) do
+  def lookup(%{assigns: %{user: for_user}} = conn, %{acct: nickname} = _params) do
+    with %User{} = user <- User.get_by_nickname(nickname),
+         :visible <- User.visible_for(user, for_user) do
       render(conn, "show.json",
         user: user,
         skip_visibility_check: true
@@ -586,6 +594,32 @@ defmodule Pleroma.Web.MastodonAPI.AccountController do
       as: :user,
       embed_relationships: embed_relationships?(params)
     )
+  end
+
+  @doc "GET /api/v1/accounts/familiar_followers"
+  def familiar_followers(%{assigns: %{user: user}} = conn, %{id: id}) do
+    users =
+      User.get_all_by_ids(List.wrap(id))
+      |> Enum.map(&%{id: &1.id, accounts: get_familiar_followers(&1, user)})
+
+    conn
+    |> render("familiar_followers.json",
+      for: user,
+      users: users,
+      as: :user
+    )
+  end
+
+  defp get_familiar_followers(%{id: id} = user, %{id: id}) do
+    User.get_familiar_followers(user, user)
+  end
+
+  defp get_familiar_followers(%{hide_followers: true}, _current_user) do
+    []
+  end
+
+  defp get_familiar_followers(user, current_user) do
+    User.get_familiar_followers(user, current_user)
   end
 
   @doc "GET /api/v1/identity_proofs"

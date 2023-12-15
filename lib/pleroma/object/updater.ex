@@ -7,6 +7,7 @@ defmodule Pleroma.Object.Updater do
 
   alias Pleroma.Object
   alias Pleroma.Repo
+  alias Pleroma.Workers.EventReminderWorker
 
   def update_content_fields(orig_object_data, updated_object) do
     Pleroma.Constants.status_updatable_fields()
@@ -283,6 +284,8 @@ defmodule Pleroma.Object.Updater do
           _ -> nil
         end
       end
+
+      EventReminderWorker.schedule_event_reminder(orig_object)
 
       {:ok, new_object, updated}
     end

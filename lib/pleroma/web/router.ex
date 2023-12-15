@@ -224,6 +224,12 @@ defmodule Pleroma.Web.Router do
     post("/remote_interaction", UtilController, :remote_interaction)
   end
 
+  scope "/api/v1/pleroma", Pleroma.Web.PleromaAPI do
+    pipe_through(:pleroma_api)
+
+    get("/federation_status", InstancesController, :show)
+  end
+
   scope "/api/v1/pleroma", Pleroma.Web do
     pipe_through(:pleroma_api)
     post("/uploader_callback/:upload_path", UploaderController, :callback)
@@ -286,6 +292,24 @@ defmodule Pleroma.Web.Router do
     post("/frontends/install", FrontendController, :install)
 
     post("/backups", AdminAPIController, :create_backup)
+
+    get("/email_list/subscribers.csv", EmailListController, :subscribers)
+    get("/email_list/unsubscribers.csv", EmailListController, :unsubscribers)
+    get("/email_list/combined.csv", EmailListController, :combined)
+
+    get("/rules", RuleController, :index)
+    post("/rules", RuleController, :create)
+    patch("/rules/:id", RuleController, :update)
+    delete("/rules/:id", RuleController, :delete)
+
+    get("/webhooks", WebhookController, :index)
+    get("/webhooks/:id", WebhookController, :show)
+    post("/webhooks", WebhookController, :create)
+    patch("/webhooks/:id", WebhookController, :update)
+    delete("/webhooks/:id", WebhookController, :delete)
+    post("/webhooks/:id/enable", WebhookController, :enable)
+    post("/webhooks/:id/disable", WebhookController, :disable)
+    post("/webhooks/:id/rotate_secret", WebhookController, :rotate_secret)
   end
 
   # AdminAPI: admins and mods (staff) can perform these actions (if privileged by role)
@@ -371,6 +395,7 @@ defmodule Pleroma.Web.Router do
     get("/reports", ReportController, :index)
     get("/reports/:id", ReportController, :show)
     patch("/reports", ReportController, :update)
+    post("/reports/assign_account", ReportController, :assign_account)
     post("/reports/:id/notes", ReportController, :notes_create)
     delete("/reports/:report_id/notes/:id", ReportController, :notes_delete)
   end
@@ -421,6 +446,48 @@ defmodule Pleroma.Web.Router do
     get("/stats", AdminAPIController, :stats)
   end
 
+  # Mastodon AdminAPI: admins and mods (staff) can perform these actions (if privileged by role)
+  scope "/api/v1/admin", Pleroma.Web.MastodonAPI.Admin do
+    pipe_through([:require_privileged_role_users_read])
+
+    get("/accounts", AccountController, :index)
+    get("/accounts/:id", AccountController, :show)
+  end
+
+  # Mastodon AdminAPI: admins and mods (staff) can perform these actions (if privileged by role)
+  scope "/api/v1/admin", Pleroma.Web.MastodonAPI.Admin do
+    pipe_through(:require_privileged_role_users_delete)
+
+    delete("/accounts/:id", AccountController, :delete)
+  end
+
+  # Mastodon AdminAPI: admins and mods (staff) can perform these actions (if privileged by role)
+  scope "/api/v1/admin", Pleroma.Web.MastodonAPI.Admin do
+    pipe_through([:require_privileged_role_users_manage_activation_state])
+
+    post("/accounts/:id/action", AccountController, :account_action)
+    post("/accounts/:id/enable", AccountController, :enable)
+  end
+
+  # Mastodon AdminAPI: admins and mods (staff) can perform these actions (if privileged by role)
+  scope "/api/v1/admin", Pleroma.Web.MastodonAPI.Admin do
+    pipe_through([:require_privileged_role_users_manage_invites])
+    post("/accounts/:id/approve", AccountController, :approve)
+    post("/accounts/:id/reject", AccountController, :reject)
+  end
+
+  # Mastodon AdminAPI: admins and mods (staff) can perform these actions (if privileged by role)
+  scope "/api/v1/admin", Pleroma.Web.MastodonAPI.Admin do
+    pipe_through([:require_privileged_role_reports_manage_reports])
+
+    get("/reports", ReportController, :index)
+    get("/reports/:id", ReportController, :show)
+    post("/reports/:id/resolve", ReportController, :resolve)
+    post("/reports/:id/reopen", ReportController, :reopen)
+    post("/reports/:id/assign_to_self", ReportController, :assign_to_self)
+    post("/reports/:id/unassign", ReportController, :unassign)
+  end
+
   scope "/api/v1/pleroma/emoji", Pleroma.Web.PleromaAPI do
     scope "/pack" do
       pipe_through(:require_privileged_role_emoji_manage_emoji)
@@ -465,6 +532,8 @@ defmodule Pleroma.Web.Router do
     get("/main/ostatus", UtilController, :show_subscribe_form)
     get("/ostatus_subscribe", RemoteFollowController, :follow)
     post("/ostatus_subscribe", RemoteFollowController, :do_follow)
+
+    get("/authorize_interaction", RemoteFollowController, :authorize_interaction)
   end
 
   scope "/api/pleroma", Pleroma.Web.TwitterAPI do
@@ -550,6 +619,7 @@ defmodule Pleroma.Web.Router do
       post("/chats/by-account-id/:id", ChatController, :create)
       get("/chats", ChatController, :index)
       get("/chats/:id", ChatController, :show)
+      delete("/chats/:id", ChatController, :delete)
       get("/chats/:id/messages", ChatController, :messages)
       post("/chats/:id/messages", ChatController, :post_chat_message)
       delete("/chats/:id/messages/:message_id", ChatController, :delete_message)
@@ -572,12 +642,38 @@ defmodule Pleroma.Web.Router do
 
       get("/backups", BackupController, :index)
       post("/backups", BackupController, :create)
+
+      post("/events", EventController, :create)
+      get("/events/joined_events", EventController, :joined_events)
+      put("/events/:id", EventController, :update)
+      get("/events/:id/participations", EventController, :participations)
+      get("/events/:id/participation_requests", EventController, :participation_requests)
+
+      post(
+        "/events/:id/participation_requests/:participant_id/authorize",
+        EventController,
+        :authorize_participation_request
+      )
+
+      post(
+        "/events/:id/participation_requests/:participant_id/reject",
+        EventController,
+        :reject_participation_request
+      )
+
+      post("/events/:id/join", EventController, :join)
+      post("/events/:id/leave", EventController, :leave)
+      get("/events/:id/ics", EventController, :export_ics)
+
+      get("/search/location", SearchController, :location)
     end
 
     scope [] do
       pipe_through(:api)
       get("/accounts/:id/favourites", AccountController, :favourites)
       get("/accounts/:id/endorsements", AccountController, :endorsements)
+
+      get("/statuses/:id/quotes", StatusController, :quotes)
     end
 
     scope [] do
@@ -589,26 +685,86 @@ defmodule Pleroma.Web.Router do
       get("/birthdays", AccountController, :birthdays)
     end
 
-    scope [] do
-      pipe_through(:authenticated_api)
-
-      get("/settings/:app", SettingsController, :show)
-      patch("/settings/:app", SettingsController, :update)
-    end
-
     post("/accounts/confirmation_resend", AccountController, :confirmation_resend)
   end
 
   scope "/api/v1/pleroma", Pleroma.Web.PleromaAPI do
     pipe_through(:api)
     get("/accounts/:id/scrobbles", ScrobbleController, :index)
-    get("/federation_status", InstancesController, :show)
   end
 
   scope "/api/v2/pleroma", Pleroma.Web.PleromaAPI do
     scope [] do
       pipe_through(:authenticated_api)
       get("/chats", ChatController, :index2)
+    end
+  end
+
+  scope "/api/v1/soapbox/admin", Pleroma.Web.AdminAPI do
+    # AdminAPI: only admins can perform these actions
+    scope [] do
+      pipe_through([:admin_api, :require_admin])
+
+      get("/email_list/subscribers.csv", EmailListController, :subscribers)
+      get("/email_list/unsubscribers.csv", EmailListController, :unsubscribers)
+      get("/email_list/combined.csv", EmailListController, :combined)
+
+      get("/rules", RuleController, :index)
+      post("/rules", RuleController, :create)
+      patch("/rules/:id", RuleController, :update)
+      delete("/rules/:id", RuleController, :delete)
+
+      get("/webhooks", WebhookController, :index)
+      get("/webhooks/:id", WebhookController, :show)
+      post("/webhooks", WebhookController, :create)
+      patch("/webhooks/:id", WebhookController, :update)
+      delete("/webhooks/:id", WebhookController, :delete)
+      post("/webhooks/:id/enable", WebhookController, :enable)
+      post("/webhooks/:id/disable", WebhookController, :disable)
+      post("/webhooks/:id/rotate_secret", WebhookController, :rotate_secret)
+    end
+
+    # AdminAPI: admins and mods (staff) can perform these actions (if privileged by role)
+    scope [] do
+      pipe_through(:require_privileged_role_reports_manage_reports)
+
+      post("/reports/assign_account", ReportController, :assign_account)
+    end
+  end
+
+  scope "/api/v1/soapbox", Pleroma.Web.PleromaAPI do
+    scope [] do
+      pipe_through(:authenticated_api)
+
+      post("/events", EventController, :create)
+      get("/events/joined_events", EventController, :joined_events)
+      put("/events/:id", EventController, :update)
+      get("/events/:id/participations", EventController, :participations)
+      get("/events/:id/participation_requests", EventController, :participation_requests)
+
+      post(
+        "/events/:id/participation_requests/:participant_id/authorize",
+        EventController,
+        :authorize_participation_request
+      )
+
+      post(
+        "/events/:id/participation_requests/:participant_id/reject",
+        EventController,
+        :reject_participation_request
+      )
+
+      post("/events/:id/join", EventController, :join)
+      post("/events/:id/leave", EventController, :leave)
+      get("/events/:id/ics", EventController, :export_ics)
+
+      get("/search/location", SearchController, :location)
+    end
+
+    scope [] do
+      pipe_through(:api)
+
+      get("/statuses/:id/quotes", StatusController, :quotes)
     end
   end
 
@@ -619,6 +775,7 @@ defmodule Pleroma.Web.Router do
     patch("/accounts/update_credentials", AccountController, :update_credentials)
 
     get("/accounts/relationships", AccountController, :relationships)
+    get("/accounts/familiar_followers", AccountController, :familiar_followers)
     get("/accounts/:id/lists", AccountController, :lists)
     get("/accounts/:id/identity_proofs", AccountController, :identity_proofs)
     get("/endorsements", AccountController, :endorsements)
@@ -750,6 +907,9 @@ defmodule Pleroma.Web.Router do
 
     get("/instance", InstanceController, :show)
     get("/instance/peers", InstanceController, :peers)
+    get("/instance/rules", InstanceController, :rules)
+    get("/instance/domain_blocks", InstanceController, :domain_blocks)
+    get("/instance/translation_languages", InstanceController, :translation_languages)
 
     get("/statuses", StatusController, :index)
     get("/statuses/:id", StatusController, :show)
@@ -759,6 +919,7 @@ defmodule Pleroma.Web.Router do
     get("/statuses/:id/reblogged_by", StatusController, :reblogged_by)
     get("/statuses/:id/history", StatusController, :show_history)
     get("/statuses/:id/source", StatusController, :show_source)
+    post("/statuses/:id/translate", StatusController, :translate)
 
     get("/custom_emojis", CustomEmojiController, :index)
 
@@ -774,11 +935,14 @@ defmodule Pleroma.Web.Router do
 
   scope "/api/v2", Pleroma.Web.MastodonAPI do
     pipe_through(:api)
+
     get("/search", SearchController, :search2)
 
     post("/media", MediaController, :create2)
 
     get("/suggestions", SuggestionController, :index2)
+
+    get("/instance", InstanceController, :show2)
   end
 
   scope "/api", Pleroma.Web do
@@ -809,6 +973,7 @@ defmodule Pleroma.Web.Router do
 
     get("/oauth_tokens", TwitterAPI.Controller, :oauth_tokens)
     delete("/oauth_tokens/:id", TwitterAPI.Controller, :revoke_token)
+    delete("/oauth_tokens", TwitterAPI.Controller, :revoke_all_tokens)
   end
 
   scope "/", Pleroma.Web do
@@ -819,6 +984,11 @@ defmodule Pleroma.Web.Router do
     get("/objects/:uuid", OStatus.OStatusController, :object)
     get("/activities/:uuid", OStatus.OStatusController, :activity)
     get("/notice/:id", OStatus.OStatusController, :notice)
+
+    # Notice compatibility routes for other frontends
+    get("/@:nickname/:id", OStatus.OStatusController, :notice)
+    get("/@:nickname/posts/:id", OStatus.OStatusController, :notice)
+    get("/:nickname/status/:id", OStatus.OStatusController, :notice)
 
     # Mastodon compatibility routes
     get("/users/:nickname/statuses/:id", OStatus.OStatusController, :object)
@@ -832,6 +1002,7 @@ defmodule Pleroma.Web.Router do
 
     # Note: returns user _profile_ for json requests, redirects to user _feed_ for non-json ones
     get("/users/:nickname", Feed.UserController, :feed_redirect, as: :user_feed)
+    get("/@:nickname", Feed.UserController, :feed_redirect, as: :user_feed)
   end
 
   scope "/", Pleroma.Web do
@@ -1003,9 +1174,8 @@ defmodule Pleroma.Web.Router do
     options("/*path", RedirectController, :empty)
   end
 
-  # TODO: Change to Phoenix.Router.routes/1 for Phoenix 1.6.0+
   def get_api_routes do
-    __MODULE__.__routes__()
+    Phoenix.Router.routes(__MODULE__)
     |> Enum.reject(fn r -> r.plug == Pleroma.Web.Fallback.RedirectController end)
     |> Enum.map(fn r ->
       r.path

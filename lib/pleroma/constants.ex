@@ -19,7 +19,15 @@ defmodule Pleroma.Constants do
       "context_id",
       "deleted_activity_id",
       "pleroma_internal",
-      "generator"
+      "generator",
+      "assigned_account",
+      "rules",
+      "content_type",
+      "language",
+      "participations",
+      "participation_count",
+      "participation_request_count",
+      "location_id"
     ]
   )
 
@@ -38,7 +46,14 @@ defmodule Pleroma.Constants do
       "summary",
       "sensitive",
       "attachment",
-      "generator"
+      "generator",
+      "language",
+      "startTime",
+      "endTime",
+      "location",
+      "location_id",
+      "location_provider",
+      "name"
     ]
   )
 
@@ -83,4 +98,19 @@ defmodule Pleroma.Constants do
   )
 
   const(upload_object_types, do: ["Document", "Image"])
+
+  const(activity_json_canonical_mime_type,
+    do: "application/ld+json; profile=\"https://www.w3.org/ns/activitystreams\""
+  )
+
+  const(activity_json_mime_types,
+    do: [
+      "application/ld+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+      "application/activity+json"
+    ]
+  )
+
+  const(public_streams,
+    do: ["public", "public:local", "public:media", "public:local:media"]
+  )
 end

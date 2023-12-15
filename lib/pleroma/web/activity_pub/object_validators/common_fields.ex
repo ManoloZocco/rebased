@@ -5,6 +5,7 @@
 defmodule Pleroma.Web.ActivityPub.ObjectValidators.CommonFields do
   alias Pleroma.EctoType.ActivityPub.ObjectValidators
   alias Pleroma.Web.ActivityPub.ObjectValidators.AttachmentValidator
+  alias Pleroma.Web.ActivityPub.ObjectValidators.PlaceValidator
   alias Pleroma.Web.ActivityPub.ObjectValidators.TagValidator
 
   # Activities and Objects, except (Create)ChatMessage
@@ -27,7 +28,7 @@ defmodule Pleroma.Web.ActivityPub.ObjectValidators.CommonFields do
     end
   end
 
-  # All objects except Answer and CHatMessage
+  # All objects except Answer and ChatMessage
   defmacro object_fields do
     quote bind_quoted: binding() do
       field(:content, :string)
@@ -57,11 +58,29 @@ defmodule Pleroma.Web.ActivityPub.ObjectValidators.CommonFields do
       field(:replies_count, :integer, default: 0)
       field(:like_count, :integer, default: 0)
       field(:announcement_count, :integer, default: 0)
+      field(:quotes_count, :integer, default: 0)
+      field(:language, :string)
       field(:inReplyTo, ObjectValidators.ObjectID)
+      field(:quoteUrl, ObjectValidators.ObjectID)
       field(:url, ObjectValidators.BareUri)
 
       field(:likes, {:array, ObjectValidators.ObjectID}, default: [])
       field(:announcements, {:array, ObjectValidators.ObjectID}, default: [])
+    end
+  end
+
+  defmacro event_object_fields do
+    quote bind_quoted: binding() do
+      field(:startTime, ObjectValidators.DateTime)
+      field(:endTime, ObjectValidators.DateTime)
+
+      field(:joinMode, :string, default: "free")
+
+      embeds_one(:location, PlaceValidator)
+
+      field(:participation_count, :integer, default: 0)
+      field(:participations, {:array, ObjectValidators.ObjectID}, default: [])
+      field(:participation_request_count, :integer, default: 0)
     end
   end
 end

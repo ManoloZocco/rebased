@@ -123,7 +123,7 @@ defmodule Pleroma.Web.ActivityPub.TransmogrifierTest do
       assert activity.data["context"] == object.data["context"]
     end
 
-    test "it drops link tags" do
+    test "it keeps link tags" do
       insert(:user, ap_id: "https://example.org/users/alice")
 
       message = File.read!("test/fixtures/fep-e232.json") |> Jason.decode!()
@@ -131,10 +131,29 @@ defmodule Pleroma.Web.ActivityPub.TransmogrifierTest do
       assert {:ok, activity} = Transmogrifier.handle_incoming(message)
 
       object = Object.normalize(activity)
-      assert length(object.data["tag"]) == 1
+      assert [%{"type" => "Mention"}, %{"type" => "Link"}] = object.data["tag"]
+    end
 
-      tag = object.data["tag"] |> List.first()
-      assert tag["type"] == "Mention"
+    test "it accepts quote posts" do
+      insert(:user, ap_id: "https://misskey.io/users/7rkrarq81i")
+
+      object = File.read!("test/fixtures/quote_post/misskey_quote_post.json") |> Jason.decode!()
+
+      message = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "type" => "Create",
+        "actor" => "https://misskey.io/users/7rkrarq81i",
+        "object" => object
+      }
+
+      assert {:ok, activity} = Transmogrifier.handle_incoming(message)
+
+      # Object was created in the database
+      object = Object.normalize(activity)
+      assert object.data["quoteUrl"] == "https://misskey.io/notes/8vs6wxufd0"
+
+      # It fetched the quoted post
+      assert Object.normalize("https://misskey.io/notes/8vs6wxufd0")
     end
   end
 
@@ -329,26 +348,30 @@ defmodule Pleroma.Web.ActivityPub.TransmogrifierTest do
       assert url == "http://localhost:4001/emoji/dino%20walking.gif"
     end
 
-    test "Updates of Notes are handled" do
+    test "it adds contentMap if language is specified" do
       user = insert(:user)
 
-      {:ok, activity} = CommonAPI.post(user, %{status: "everybody do the dinosaur :dinosaur:"})
-      {:ok, update} = CommonAPI.update(user, activity, %{status: "mew mew :blank:"})
+      {:ok, activity} = CommonAPI.post(user, %{status: "тест", language: "uk"})
 
-      {:ok, prepared} = Transmogrifier.prepare_outgoing(update.data)
+      {:ok, prepared} = Transmogrifier.prepare_outgoing(activity.data)
 
-      assert %{
-               "content" => "mew mew :blank:",
-               "tag" => [%{"name" => ":blank:", "type" => "Emoji"}],
-               "formerRepresentations" => %{
-                 "orderedItems" => [
-                   %{
-                     "content" => "everybody do the dinosaur :dinosaur:",
-                     "tag" => [%{"name" => ":dinosaur:", "type" => "Emoji"}]
-                   }
-                 ]
-               }
-             } = prepared["object"]
+      assert prepared["object"]["contentMap"] == %{
+               "uk" => "тест"
+             }
+    end
+
+    test "it prepares a quote post" do
+      user = insert(:user)
+
+      {:ok, quoted_post} = CommonAPI.post(user, %{status: "hey"})
+      {:ok, quote_post} = CommonAPI.post(user, %{status: "hey", quote_id: quoted_post.id})
+
+      {:ok, modified} = Transmogrifier.prepare_outgoing(quote_post.data)
+
+      %{data: %{"id" => quote_id}} = Object.normalize(quoted_post)
+
+      assert modified["object"]["quoteUrl"] == quote_id
+      assert modified["object"]["quoteUri"] == quote_id
     end
   end
 

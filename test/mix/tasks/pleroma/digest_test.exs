@@ -23,6 +23,11 @@ defmodule Mix.Tasks.Pleroma.DigestTest do
 
   setup do: clear_config([Pleroma.Emails.Mailer, :enabled], true)
 
+  setup do
+    Mox.stub_with(Pleroma.UnstubbedConfigMock, Pleroma.Config)
+    :ok
+  end
+
   describe "pleroma.digest test" do
     test "Sends digest to the given user" do
       user1 = insert(:user)
@@ -34,6 +39,8 @@ defmodule Mix.Tasks.Pleroma.DigestTest do
             status: "hey ##{i} @#{user2.nickname}!"
           })
       end)
+
+      ObanHelpers.perform_all()
 
       yesterday =
         NaiveDateTime.add(

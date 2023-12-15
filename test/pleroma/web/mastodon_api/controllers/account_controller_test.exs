@@ -18,6 +18,11 @@ defmodule Pleroma.Web.MastodonAPI.AccountControllerTest do
 
   import Pleroma.Factory
 
+  setup do
+    Mox.stub_with(Pleroma.UnstubbedConfigMock, Pleroma.Config)
+    :ok
+  end
+
   describe "account fetching" do
     test "works by id" do
       %User{id: user_id} = insert(:user)
@@ -1230,6 +1235,7 @@ defmodule Pleroma.Web.MastodonAPI.AccountControllerTest do
       assert user
       assert user.is_confirmed
       assert user.is_approved
+      refute user.accepts_email_list
     end
 
     test "registers but does not log in with :account_activation_required", %{conn: conn} do
@@ -1459,6 +1465,20 @@ defmodule Pleroma.Web.MastodonAPI.AccountControllerTest do
         |> post("/api/v1/accounts", Map.put(valid_params, :email, ""))
 
       assert json_response_and_validate_schema(res, 200)
+    end
+
+    test "registration with accepts_email_list", %{conn: conn, valid_params: valid_params} do
+      app_token = insert(:oauth_token, user: nil)
+      conn = put_req_header(conn, "authorization", "Bearer " <> app_token.token)
+
+      res =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> Map.put(:remote_ip, {127, 0, 0, 9})
+        |> post("/api/v1/accounts", Map.put(valid_params, :accepts_email_list, true))
+
+      assert json_response_and_validate_schema(res, 200)
+      assert %User{accepts_email_list: true} = Repo.get_by(User, email: "lain@example.org")
     end
 
     test "returns forbidden if token is invalid", %{conn: conn, valid_params: valid_params} do
@@ -1822,7 +1842,6 @@ defmodule Pleroma.Web.MastodonAPI.AccountControllerTest do
       response = json_response_and_validate_schema(conn, 200)
 
       assert %{"id" => id, "source" => %{"privacy" => "public"}} = response
-      assert response["pleroma"]["chat_token"]
       assert response["pleroma"]["unread_notifications_count"] == 6
       assert id == to_string(user.id)
     end
@@ -2088,6 +2107,50 @@ defmodule Pleroma.Web.MastodonAPI.AccountControllerTest do
       |> json_response_and_validate_schema(404)
   end
 
+  test "account lookup with restrict unauthenticated profiles for local" do
+    clear_config([:restrict_unauthenticated, :profiles, :local], true)
+
+    user = insert(:user, local: true)
+    reading_user = insert(:user)
+
+    conn =
+      build_conn()
+      |> get("/api/v1/accounts/lookup?acct=#{user.nickname}")
+
+    assert json_response_and_validate_schema(conn, 401)
+
+    conn =
+      build_conn()
+      |> assign(:user, reading_user)
+      |> assign(:token, insert(:oauth_token, user: reading_user, scopes: ["read:accounts"]))
+      |> get("/api/v1/accounts/lookup?acct=#{user.nickname}")
+
+    assert %{"id" => id} = json_response_and_validate_schema(conn, 200)
+    assert id == user.id
+  end
+
+  test "account lookup with restrict unauthenticated profiles for remote" do
+    clear_config([:restrict_unauthenticated, :profiles, :remote], true)
+
+    user = insert(:user, nickname: "user@example.com", local: false)
+    reading_user = insert(:user)
+
+    conn =
+      build_conn()
+      |> get("/api/v1/accounts/lookup?acct=#{user.nickname}")
+
+    assert json_response_and_validate_schema(conn, 401)
+
+    conn =
+      build_conn()
+      |> assign(:user, reading_user)
+      |> assign(:token, insert(:oauth_token, user: reading_user, scopes: ["read:accounts"]))
+      |> get("/api/v1/accounts/lookup?acct=#{user.nickname}")
+
+    assert %{"id" => id} = json_response_and_validate_schema(conn, 200)
+    assert id == user.id
+  end
+
   test "create a note on a user" do
     %{conn: conn} = oauth_access(["write:accounts", "read:follows"])
     other_user = insert(:user)
@@ -2164,6 +2227,55 @@ defmodule Pleroma.Web.MastodonAPI.AccountControllerTest do
                |> assign(:user, user)
                |> post("/api/v1/accounts/#{id2}/pin")
                |> json_response_and_validate_schema(400)
+    end
+  end
+
+  describe "familiar followers" do
+    setup do: oauth_access(["read:follows"])
+
+    test "fetch user familiar followers", %{user: user, conn: conn} do
+      %{id: id1} = other_user1 = insert(:user)
+      %{id: id2} = other_user2 = insert(:user)
+      _ = insert(:user)
+
+      User.follow(user, other_user1)
+      User.follow(other_user1, other_user2)
+
+      assert [%{"accounts" => [%{"id" => ^id1}], "id" => ^id2}] =
+               conn
+               |> put_req_header("content-type", "application/json")
+               |> get("/api/v1/accounts/familiar_followers?id[]=#{id2}")
+               |> json_response_and_validate_schema(200)
+    end
+
+    test "returns empty array if followers are hidden", %{user: user, conn: conn} do
+      other_user1 = insert(:user, hide_follows: true)
+      %{id: id2} = other_user2 = insert(:user)
+      _ = insert(:user)
+
+      User.follow(user, other_user1)
+      User.follow(other_user1, other_user2)
+
+      assert [%{"accounts" => [], "id" => ^id2}] =
+               conn
+               |> put_req_header("content-type", "application/json")
+               |> get("/api/v1/accounts/familiar_followers?id[]=#{id2}")
+               |> json_response_and_validate_schema(200)
+    end
+
+    test "it respects hide_followers", %{user: user, conn: conn} do
+      other_user1 = insert(:user)
+      %{id: id2} = other_user2 = insert(:user, hide_followers: true)
+      _ = insert(:user)
+
+      User.follow(user, other_user1)
+      User.follow(other_user1, other_user2)
+
+      assert [%{"accounts" => [], "id" => ^id2}] =
+               conn
+               |> put_req_header("content-type", "application/json")
+               |> get("/api/v1/accounts/familiar_followers?id[]=#{id2}")
+               |> json_response_and_validate_schema(200)
     end
   end
 
