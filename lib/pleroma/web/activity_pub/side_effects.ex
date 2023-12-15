@@ -16,6 +16,7 @@ defmodule Pleroma.Web.ActivityPub.SideEffects do
   alias Pleroma.Notification
   alias Pleroma.Object
   alias Pleroma.Repo
+  alias Pleroma.ThreadSubscription
   alias Pleroma.User
   alias Pleroma.Web.ActivityPub.ActivityPub
   alias Pleroma.Web.ActivityPub.Builder
@@ -90,40 +91,20 @@ defmodule Pleroma.Web.ActivityPub.SideEffects do
   def handle(
         %{
           data: %{
-            "id" => follow_id,
             "type" => "Follow",
-            "object" => followed_user,
+            "object" => followed_object,
             "actor" => following_user
           }
         } = object,
         meta
       ) do
     with %User{} = follower <- User.get_cached_by_ap_id(following_user),
-         %User{} = followed <- User.get_cached_by_ap_id(followed_user),
-         {_, {:ok, _, _}, _, _} <-
-           {:following, User.follow(follower, followed, :follow_pending), follower, followed} do
-      if followed.local && !followed.is_locked do
-        {:ok, accept_data, _} = Builder.accept(followed, object)
-        {:ok, _activity, _} = Pipeline.common_pipeline(accept_data, local: true)
-      end
-    else
-      {:following, {:error, _}, _follower, followed} ->
-        {:ok, reject_data, _} = Builder.reject(followed, object)
-        {:ok, _activity, _} = Pipeline.common_pipeline(reject_data, local: true)
-
-      _ ->
-        nil
+         followed <-
+           Object.normalize(followed_object, fetch: false) ||
+             User.get_cached_by_ap_id(followed_object),
+         {:ok, object, meta} <- handle_follow(object, follower, followed, meta) do
+      {:ok, object, meta}
     end
-
-    {:ok, notifications} = Notification.create_notifications(object, do_send: false)
-
-    meta =
-      meta
-      |> add_notifications(notifications)
-
-    updated_object = Activity.get_by_ap_id(follow_id)
-
-    {:ok, updated_object, meta}
   end
 
   # Tasks this handles:
@@ -608,6 +589,49 @@ defmodule Pleroma.Web.ActivityPub.SideEffects do
     {:ok, object, meta}
   end
 
+  defp handle_follow(
+         %{data: %{"id" => follow_id}} = object,
+         %User{} = follower,
+         %User{} = followed,
+         meta
+       ) do
+    with {_, {:ok, _, _}, _, _} <-
+           {:following, User.follow(follower, followed, :follow_pending), follower, followed} do
+      if followed.local && !followed.is_locked do
+        {:ok, accept_data, _} = Builder.accept(followed, object)
+        {:ok, _activity, _} = Pipeline.common_pipeline(accept_data, local: true)
+      end
+    else
+      {:following, {:error, _}, _follower, followed} ->
+        {:ok, reject_data, _} = Builder.reject(followed, object)
+        {:ok, _activity, _} = Pipeline.common_pipeline(reject_data, local: true)
+
+      _ ->
+        nil
+    end
+
+    {:ok, notifications} = Notification.create_notifications(object, do_send: false)
+
+    meta =
+      meta
+      |> add_notifications(notifications)
+
+    updated_object = Activity.get_by_ap_id(follow_id)
+
+    {:ok, updated_object, meta}
+  end
+
+  defp handle_follow(
+         object,
+         %User{id: user_id} = _follower,
+         %Object{} = followed,
+         meta
+       ) do
+    ThreadSubscription.add_subscription(user_id, followed.data["context"])
+
+    {:ok, object, meta}
+  end
+
   defp undo_like(nil, object), do: delete_object(object)
 
   defp undo_like(%Object{} = liked_object, object) do
@@ -646,6 +670,19 @@ defmodule Pleroma.Web.ActivityPub.SideEffects do
          {:ok, _} <- User.unblock(blocker, blocked),
          {:ok, _} <- Repo.delete(object) do
       :ok
+    end
+  end
+
+  def handle_undoing(
+        %{data: %{"type" => "Follow", "actor" => ap_id, "object" => followed}} = object
+      ) do
+    with %Object{} = followed <- Object.normalize(followed, fetch: false),
+         %User{id: user_id} <- User.get_cached_by_ap_id(ap_id),
+         _ <- ThreadSubscription.remove_subscription(user_id, followed.data["context"]),
+         {:ok, _} <- Repo.delete(object) do
+      :ok
+    else
+      nil -> :ok
     end
   end
 

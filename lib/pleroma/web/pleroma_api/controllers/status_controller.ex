@@ -5,7 +5,7 @@
 defmodule Pleroma.Web.PleromaAPI.StatusController do
   use Pleroma.Web, :controller
 
-  import Pleroma.Web.ControllerHelper, only: [add_link_headers: 2]
+  import Pleroma.Web.ControllerHelper, only: [add_link_headers: 2, try_render: 3]
 
   require Ecto.Query
   require Pleroma.Constants
@@ -14,19 +14,46 @@ defmodule Pleroma.Web.PleromaAPI.StatusController do
   alias Pleroma.User
   alias Pleroma.Web.ActivityPub.ActivityPub
   alias Pleroma.Web.ActivityPub.Visibility
+  alias Pleroma.Web.CommonAPI
   alias Pleroma.Web.MastodonAPI.StatusView
   alias Pleroma.Web.Plugs.OAuthScopesPlug
 
   plug(Pleroma.Web.ApiSpec.CastAndValidate)
 
-  action_fallback(Pleroma.Web.MastodonAPI.FallbackController)
+  plug(
+    OAuthScopesPlug,
+    %{scopes: ["write:notifications"]}
+    when action in [:subscribe_conversation, :unsubscribe_conversation]
+  )
 
   plug(
     OAuthScopesPlug,
     %{scopes: ["read:statuses"], fallback: :proceed_unauthenticated} when action == :quotes
   )
 
+  action_fallback(Pleroma.Web.MastodonAPI.FallbackController)
+
   defdelegate open_api_operation(action), to: Pleroma.Web.ApiSpec.PleromaStatusOperation
+
+  @doc "POST /api/v1/pleroma/statuses/:id/subscribe"
+  def subscribe_conversation(%{assigns: %{user: user}} = conn, %{id: id}) do
+    with %Activity{} = activity <- Activity.get_by_id(id),
+         {:ok, activity} <- CommonAPI.add_subscription(user, activity) do
+      conn
+      |> put_view(StatusView)
+      |> try_render("show.json", activity: activity, for: user, as: :activity)
+    end
+  end
+
+  @doc "POST /api/v1/pleroma/statuses/:id/unsubscribe"
+  def unsubscribe_conversation(%{assigns: %{user: user}} = conn, %{id: id}) do
+    with %Activity{} = activity <- Activity.get_by_id(id),
+         {:ok, activity} <- CommonAPI.remove_subscription(user, activity) do
+      conn
+      |> put_view(StatusView)
+      |> try_render("show.json", activity: activity, for: user, as: :activity)
+    end
+  end
 
   @doc "GET /api/v1/pleroma/statuses/:id/quotes"
   def quotes(%{assigns: %{user: user}} = conn, %{id: id} = params) do

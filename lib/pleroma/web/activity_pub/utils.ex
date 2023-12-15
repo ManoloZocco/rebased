@@ -554,6 +554,17 @@ defmodule Pleroma.Web.ActivityPub.Utils do
     |> Repo.one()
   end
 
+  def fetch_latest_follow(%User{ap_id: follower_id}, %Object{data: %{"id" => followed_id}}) do
+    "Follow"
+    |> Activity.Queries.by_type()
+    |> where(actor: ^follower_id)
+    # this is to use the index
+    |> Activity.Queries.by_object_id(followed_id)
+    |> order_by([activity], fragment("? desc nulls last", activity.id))
+    |> limit(1)
+    |> Repo.one()
+  end
+
   def fetch_latest_undo(%User{ap_id: ap_id}) do
     "Undo"
     |> Activity.Queries.by_type()
@@ -1035,4 +1046,37 @@ defmodule Pleroma.Web.ActivityPub.Utils do
       {:ok, activity}
     end
   end
+
+  @spec add_follower_to_object(Activity.t(), Object.t()) ::
+          {:ok, Object.t()} | {:error, Ecto.Changeset.t()}
+  def add_follower_to_object(
+        %Activity{data: %{"actor" => actor}},
+        object
+      ) do
+    unless actor |> User.get_cached_by_ap_id() |> User.invisible?() do
+      followers = take_followers(object)
+
+      with followers <- Enum.uniq([actor | followers]) do
+        update_element_in_object("follower", followers, object)
+      end
+    else
+      {:ok, object}
+    end
+  end
+
+  def add_follower_to_object(_, object), do: {:ok, object}
+
+  @spec remove_follower_from_object(Activity.t(), Object.t()) ::
+          {:ok, Object.t()} | {:error, Ecto.Changeset.t()}
+  def remove_follower_from_object(%Activity{data: %{"actor" => actor}}, object) do
+    with followers <- List.delete(take_followers(object), actor) do
+      update_element_in_object("follower", followers, object)
+    end
+  end
+
+  defp take_followers(%{data: %{"followers" => followers}} = _)
+       when is_list(followers),
+       do: followers
+
+  defp take_followers(_), do: []
 end

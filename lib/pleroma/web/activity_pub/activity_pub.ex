@@ -495,6 +495,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
     |> maybe_preload_bookmarks(opts)
     |> maybe_set_thread_muted_field(opts)
     |> restrict_unauthenticated(opts[:user])
+    |> maybe_set_thread_fields(opts)
     |> restrict_blocked(opts)
     |> restrict_blockers_visibility(opts)
     |> restrict_recipients(recipients, opts[:user])
@@ -1392,6 +1393,20 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
     |> Activity.with_set_thread_muted_field(opts[:muting_user] || opts[:user])
   end
 
+  defp maybe_set_thread_subscribed_field(query, %{skip_preload: true}), do: query
+
+  defp maybe_set_thread_subscribed_field(query, opts) do
+    query
+    |> Activity.with_set_thread_subscribed_field(opts[:user])
+  end
+
+  defp maybe_set_thread_fields(query, %{skip_preload: true}), do: query
+
+  defp maybe_set_thread_fields(query, opts) do
+    query
+    |> Activity.with_set_thread_fields(opts[:user], opts[:muting_user])
+  end
+
   defp maybe_order(query, %{order: :desc}) do
     query
     |> order_by(desc: :id)
@@ -1462,6 +1477,7 @@ defmodule Pleroma.Web.ActivityPub.ActivityPub do
       |> maybe_preload_bookmarks(opts)
       |> maybe_preload_report_notes(opts)
       |> maybe_set_thread_muted_field(opts)
+      |> maybe_set_thread_subscribed_field(opts)
       |> maybe_order(opts)
       |> restrict_recipients(recipients, opts[:user])
       |> restrict_replies(opts)

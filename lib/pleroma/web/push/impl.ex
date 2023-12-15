@@ -200,6 +200,7 @@ defmodule Pleroma.Web.Push.Impl do
       "update" -> "New Update"
       "pleroma:chat_mention" -> "New Chat Message"
       "pleroma:emoji_reaction" -> "New Reaction"
+      "pleroma:thread_subscription" -> "New Reply"
       type -> "New #{String.capitalize(type || "event")}"
     end
   end

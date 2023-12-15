@@ -78,6 +78,7 @@ defmodule Pleroma.Notification do
     pleroma:participation_request
     pleroma:event_reminder
     pleroma:event_update
+    pleroma:thread_subscription
   }
 
   def changeset(%Notification{} = notification, attrs) do
@@ -416,6 +417,13 @@ defmodule Pleroma.Notification do
       (enabled_subscribers ++ disabled_subscribers) --
         (potential_participants ++ potential_receivers)
 
+    {enabled_thread_subscribers, disabled_thread_subscribers} =
+      get_notified_thread_subscribers_from_activity(activity)
+
+    potential_thread_subscribers =
+      (enabled_thread_subscribers ++ disabled_thread_subscribers) --
+        (potential_participants ++ potential_receivers ++ potential_subscribers)
+
     notifications =
       (Enum.map(potential_receivers, fn user ->
          do_send = do_send && user in enabled_receivers
@@ -424,6 +432,14 @@ defmodule Pleroma.Notification do
          Enum.map(potential_subscribers, fn user ->
            do_send = do_send && user in enabled_subscribers
            create_notification(activity, user, do_send: do_send, type: "status")
+         end) ++
+         Enum.map(potential_thread_subscribers, fn user ->
+           do_send = do_send && user in enabled_thread_subscribers
+
+           create_notification(activity, user,
+             do_send: do_send,
+             type: "pleroma:thread_subscription"
+           )
          end) ++
          Enum.map(potential_participants, fn user ->
            do_send = do_send && user in enabled_participants
@@ -622,6 +638,27 @@ defmodule Pleroma.Notification do
   end
 
   def get_notified_subscribers_from_activity(_, _), do: {[], []}
+
+  def get_notified_thread_subscribers_from_activity(activity, local_only \\ true)
+
+  def get_notified_thread_subscribers_from_activity(
+        %Activity{data: %{"type" => "Create"}} = activity,
+        local_only
+      ) do
+    notification_enabled_ap_ids =
+      []
+      |> Utils.maybe_notify_thread_subscribers(activity)
+
+    potential_receivers =
+      User.get_users_from_set(notification_enabled_ap_ids, local_only: local_only)
+
+    notification_enabled_users =
+      Enum.filter(potential_receivers, fn u -> u.ap_id in notification_enabled_ap_ids end)
+
+    {notification_enabled_users, potential_receivers -- notification_enabled_users}
+  end
+
+  def get_notified_thread_subscribers_from_activity(_, _), do: {[], []}
 
   def get_notified_participants_from_activity(activity, local_only \\ true)
 

@@ -10,6 +10,7 @@ defmodule Pleroma.Web.CommonAPI do
   alias Pleroma.Object
   alias Pleroma.Rule
   alias Pleroma.ThreadMute
+  alias Pleroma.ThreadSubscription
   alias Pleroma.User
   alias Pleroma.UserRelationship
   alias Pleroma.Web.ActivityPub.ActivityPub
@@ -644,6 +645,65 @@ defmodule Pleroma.Web.CommonAPI do
   end
 
   def thread_muted?(_, _), do: false
+
+  def add_subscription(user, activity) do
+    with {:ok, _} <- ThreadSubscription.add_subscription(user.id, activity.data["context"]),
+         _ <- follow_status(user, activity.id) do
+      {:ok, activity}
+    else
+      {:error, _} -> {:error, dgettext("errors", "conversation is already subscribed")}
+    end
+  end
+
+  def remove_subscription(%User{} = user, %Activity{} = activity) do
+    ThreadSubscription.remove_subscription(user.id, activity.data["context"])
+    unfollow_status(user, activity.id)
+    {:ok, activity}
+  end
+
+  def remove_subscription(user_id, activity_id) do
+    with {:user, %User{} = user} <- {:user, User.get_by_id(user_id)},
+         {:activity, %Activity{} = activity} <- {:activity, Activity.get_by_id(activity_id)} do
+      remove_subscription(user, activity)
+    else
+      {what, result} = error ->
+        Logger.warn(
+          "CommonAPI.remove_subscription/2 failed. #{what}: #{result}, user_id: #{user_id}, activity_id: #{activity_id}"
+        )
+
+        {:error, error}
+    end
+  end
+
+  def thread_subscribed?(%User{id: user_id}, %{data: %{"context" => context}})
+      when is_binary(context) do
+    ThreadSubscription.exists?(user_id, context)
+  end
+
+  def thread_subscribed?(_, _), do: false
+
+  def follow_status(%User{} = user, id) do
+    with %Activity{object: object} <- Activity.get_by_id_with_object(id),
+         {:ok, follow_data, _} <- Builder.follow(user, object),
+         {:ok, follow_activity, _} <- Pipeline.common_pipeline(follow_data, local: true) do
+      if follow_activity.data["state"] == "reject" do
+        {:error, :rejected}
+      else
+        {:ok, follow_activity}
+      end
+    end
+  end
+
+  def unfollow_status(%User{} = user, id) do
+    with %Activity{object: object} <- Activity.get_by_id_with_object(id),
+         %Activity{} = follow <- Utils.fetch_latest_follow(user, object),
+         {:ok, unfollow_data, _} <- Builder.undo(user, follow),
+         {:ok, unfollow, _} <- Pipeline.common_pipeline(unfollow_data, local: true) do
+      {:ok, unfollow}
+    else
+      e -> e
+    end
+  end
 
   def report(user, data) do
     with {:ok, account} <- get_reported_account(data.account_id),

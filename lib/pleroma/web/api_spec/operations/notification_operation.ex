@@ -211,7 +211,8 @@ defmodule Pleroma.Web.ApiSpec.NotificationOperation do
         "pleroma:participation_accepted",
         "pleroma:participation_request",
         "pleroma:event_reminder",
-        "pleroma:event_update"
+        "pleroma:event_update",
+        "pleroma:thread_subscription"
       ],
       description: """
       The type of event that resulted in the notification.
@@ -231,6 +232,7 @@ defmodule Pleroma.Web.ApiSpec.NotificationOperation do
       - `pleroma:event_update` – An event you are participating in was edited
       - `pleroma:participation_request - Someone wants to participate in your event
       - `pleroma:participation_accepted - Your event participation request was accepted
+      - `pleroma:thread_subscription - Someone replied to a status you are subscribed to
       """
     }
   end

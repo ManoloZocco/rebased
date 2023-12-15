@@ -10,6 +10,7 @@ defmodule Pleroma.Web.ActivityPub.Publisher do
   alias Pleroma.Instances
   alias Pleroma.Object
   alias Pleroma.Repo
+  alias Pleroma.ThreadSubscription
   alias Pleroma.User
   alias Pleroma.Web.ActivityPub.Relay
   alias Pleroma.Web.ActivityPub.Transmogrifier
@@ -138,8 +139,26 @@ defmodule Pleroma.Web.ActivityPub.Publisher do
           []
       end
 
-    Pleroma.Web.Federator.Publisher.remote_users(actor, activity) ++ followers ++ fetchers
+    subscribers =
+      if Pleroma.Constants.as_public() in activity.recipients do
+        get_thread_subscribers(activity.data["object"])
+        |> Enum.filter(fn ts -> ts.user end)
+      else
+        []
+      end
+
+    Pleroma.Web.Federator.Publisher.remote_users(actor, activity) ++
+      followers ++ fetchers ++ subscribers
   end
+
+  defp get_thread_subscribers(ap_id) when is_binary(ap_id),
+    do: get_thread_subscribers(Object.get_by_ap_id(ap_id))
+
+  defp get_thread_subscribers(%{data: %{"context" => context}}) do
+    ThreadSubscription.subscriber_ap_ids(context, nil, local: false)
+  end
+
+  defp get_thread_subscribers(_), do: []
 
   defp get_cc_ap_ids(ap_id, recipients) do
     host = Map.get(URI.parse(ap_id), :host)

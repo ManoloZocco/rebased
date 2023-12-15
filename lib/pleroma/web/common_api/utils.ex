@@ -12,6 +12,7 @@ defmodule Pleroma.Web.CommonAPI.Utils do
   alias Pleroma.Formatter
   alias Pleroma.Object
   alias Pleroma.Repo
+  alias Pleroma.ThreadSubscription
   alias Pleroma.User
   alias Pleroma.Web.ActivityPub.Utils
   alias Pleroma.Web.ActivityPub.Visibility
@@ -434,6 +435,17 @@ defmodule Pleroma.Web.CommonAPI.Utils do
   end
 
   def maybe_notify_subscribers(recipients, _), do: recipients
+
+  def maybe_notify_thread_subscribers(
+        recipients,
+        %Activity{data: %{"type" => "Create", "context" => context}} = _activity
+      ) do
+    subscriber_ids = ThreadSubscription.subscriber_ap_ids(context, nil, local: true)
+
+    recipients ++ subscriber_ids
+  end
+
+  def maybe_notify_thread_subscribers(recipients, _), do: recipients
 
   def maybe_notify_followers(recipients, %Activity{data: %{"type" => "Move"}} = activity) do
     with %User{} = user <- User.get_cached_by_ap_id(activity.actor) do

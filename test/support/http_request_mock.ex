@@ -1431,6 +1431,15 @@ defmodule HttpRequestMock do
      }}
   end
 
+  def get("https://ica.mkljczk.pl/profile/nofriend", _, _, _) do
+    {:ok,
+     %Tesla.Env{
+       status: 200,
+       body: File.read!("test/fixtures/tesla_mock/friendica-user-nofriend.json"),
+       headers: activitypub_object_headers()
+     }}
+  end
+
   def get("https://friends.grishka.me/posts/54642", _, _, _) do
     {:ok,
      %Tesla.Env{

@@ -131,6 +131,9 @@ defmodule Pleroma.Web.MastodonAPI.NotificationView do
       "pleroma:report" ->
         put_report(response, activity)
 
+      "pleroma:thread_subscription" ->
+        put_status(response, activity, reading_user, status_render_opts)
+
       "pleroma:participation_accepted" ->
         request_activity = Activity.get_by_ap_id(activity.data["object"])
         create_activity = Activity.get_create_by_object_ap_id(request_activity.data["object"])
