@@ -1050,9 +1050,9 @@ defmodule Pleroma.User do
 
   @spec maybe_send_registration_email(User.t()) :: {:ok, :enqueued | :noop}
   defp maybe_send_registration_email(%User{email: email} = user) when is_binary(email) do
-    with false <- User.WelcomeEmail.enabled?(),
-         false <- Config.get([:instance, :account_activation_required], false),
-         false <- Config.get([:instance, :account_approval_required], false) do
+    with true <- User.WelcomeEmail.enabled?(),
+         true <- Config.get([:instance, :account_activation_required], false),
+         true <- Config.get([:instance, :account_approval_required], false) do
       user
       |> Pleroma.Emails.UserEmail.successful_registration_email()
       |> Pleroma.Emails.Mailer.deliver_async()
