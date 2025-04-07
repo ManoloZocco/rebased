@@ -80,22 +80,6 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
     end)
   end
 
-  # DEPRECATED This field seems to be a left-over from the StatusNet era.
-  # If your application uses `pleroma.conversation_id`: this field is deprecated.
-  # It is currently stubbed instead by doing a CRC32 of the context, and
-  # clearing the MSB to avoid overflow exceptions with signed integers on the
-  # different clients using this field (Java/Kotlin code, mostly; see Husky.)
-  # This should be removed in a future version of Pleroma. Pleroma-FE currently
-  # depends on this field, as well.
-  defp get_context_id(%{data: %{"context" => context}}) when is_binary(context) do
-    import Bitwise
-
-    :erlang.crc32(context)
-    |> band(bnot(0x8000_0000))
-  end
-
-  defp get_context_id(_), do: nil
-
   # Check if the user reblogged this status
   defp reblogged?(activity, %User{ap_id: ap_id}) do
     with %Object{data: %{"announcements" => announcements}} when is_list(announcements) <-
@@ -438,7 +422,6 @@ defmodule Pleroma.Web.MastodonAPI.StatusView do
       emojis: build_emojis(object.data["emoji"]),
       pleroma: %{
         local: activity.local,
-        conversation_id: get_context_id(activity),
         context: object.data["context"],
         in_reply_to_account_acct: reply_to_user && reply_to_user.nickname,
         quote: quote_post,

@@ -163,7 +163,7 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Status do
             description: "The thread identifier the status is associated with"
           },
           conversation_id: %Schema{
-            type: :integer,
+            type: :string,
             deprecated: true,
             description:
               "The ID of the AP context the status is associated with (if any); deprecated, please use `context` instead"
@@ -375,7 +375,7 @@ defmodule Pleroma.Web.ApiSpec.Schemas.Status do
       "pleroma" => %{
         "content" => %{"text/plain" => "foobar"},
         "context" => "http://localhost:4001/objects/8b4c0c80-6a37-4d2a-b1b9-05a19e3875aa",
-        "conversation_id" => 345_972,
+        "conversation_id" => "AEXFhY7X4zd8hZK8oK",
         "direct_conversation_id" => nil,
         "emoji_reactions" => [],
         "expires_at" => nil,

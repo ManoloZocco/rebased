@@ -155,7 +155,6 @@ defmodule Pleroma.Web.MastodonAPI.InstanceView do
       "pleroma:api/v1/notifications:include_types_filter",
       "quote_posting",
       "editing",
-      "quote_posting",
       if Config.get([:activitypub, :blockers_visible]) do
         "blockers_visible"
       end,
@@ -249,7 +248,8 @@ defmodule Pleroma.Web.MastodonAPI.InstanceView do
     configuration()
     |> Map.merge(%{
       urls: %{streaming: Pleroma.Web.Endpoint.websocket_url()},
-      translation: %{enabled: Pleroma.Language.Translation.configured?()}
+      translation: %{enabled: Pleroma.Language.Translation.configured?()},
+      vapid: %{public_key: Keyword.get(Pleroma.Web.Push.vapid_config(), :public_key)}
     })
   end
 
