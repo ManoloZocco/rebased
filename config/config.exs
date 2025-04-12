@@ -585,7 +585,8 @@ config :pleroma, Pleroma.User,
     "confirmation_resend",
     "mfa"
   ],
-  email_blacklist: []
+  email_blacklist: [],
+  remove_email_subaddress: false
 
 config :pleroma, Oban,
   repo: Pleroma.Repo,
